@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-03
+
 ### Исправлено
 - Вставка cookie: если буфер обмена недоступен (нет HTTPS/разрешения, WebView), отклонён или в нём не cookie — открывается поле ввода Lampa, куда строку можно вставить вручную.
 
@@ -66,7 +68,8 @@
 - Сайт отдаёт JS-проверку браузера (anti-bot). Плагин её **не обходит**: без прокси, который её проходит, каталог не загрузится — это видно в «Диагностике».
 - Не проверено на устройстве: нативные запросы Android, реальный фокус пультом, внешние плееры, раскладка.
 
-[Unreleased]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/igorstasiuk/doramyclub-lampa/releases/tag/v0.1.0
