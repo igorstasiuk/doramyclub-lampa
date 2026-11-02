@@ -2,6 +2,8 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — SemVer.
 
+## [Unreleased]
+
 ## [0.2.0] — 2026-11-03
 
 ### Добавлено
@@ -37,3 +39,7 @@
 ### Известные ограничения
 - Сайт отдаёт JS-проверку браузера (anti-bot). Плагин её **не обходит**: без прокси, который её проходит, каталог не загрузится — это видно в «Диагностике».
 - Не проверено на устройстве: нативные запросы Android, реальный фокус пультом, внешние плееры, раскладка.
+
+[Unreleased]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/igorstasiuk/doramyclub-lampa/releases/tag/v0.1.0

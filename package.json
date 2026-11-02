@@ -4,7 +4,8 @@
   "description": "Doramy.club plugin for Lampa",
   "scripts": {
     "test": "node test/run.js && node test/smoke.js",
-    "lint": "node --check doramyclub.js"
+    "lint": "node --check doramyclub.js",
+    "check": "node --check doramyclub.js && python3 release.py --check"
   },
   "devDependencies": {
     "jquery": "^3.7.1",

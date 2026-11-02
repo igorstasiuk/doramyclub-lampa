@@ -33,7 +33,13 @@
 
 ## Подключение
 
-**Настройки → Расширения → Добавить плагин** → ссылка на `doramyclub.js` → перезапустить Lampa. Ссылку нужно сделать доступной устройству, например через jsDelivr по тегу релиза (`https://cdn.jsdelivr.net/gh/igorstasiuk/doramyclub-lampa@vX.Y.Z/doramyclub.js`) или локально: `python3 serve.py`.
+**Настройки → Расширения → Добавить плагин** → ссылка на `doramyclub.js` → перезапустить Lampa. Ссылка должна быть доступна устройству:
+
+- закреплённая версия, обновляется мгновенно: `https://cdn.jsdelivr.net/gh/igorstasiuk/doramyclub-lampa@v0.2.0/doramyclub.js`;
+- автообновление в рамках мажорной версии: `…@0/doramyclub.js` (пока версия 0.x; после 1.0 — `@1`), кеш CDN до 12 ч;
+- локально для разработки: `python3 serve.py`.
+
+**Никогда `@latest` и `@main`:** jsDelivr кеширует их на дни, устройство остаётся на старой версии. Тег `latest` на GitHub подвижный и нужен только для git.
 
 ## Важно: сайт и доступ к нему
 
@@ -53,6 +59,8 @@
 npm install
 npm test        # run.js — чистые функции; smoke.js — UI на jsdom с фикстурами (сеть не нужна)
 npm run lint
+npm run check     # версия в коде = верх CHANGELOG = последний тег = latest
+python3 release.py X.Y.Z --dry-run   # выпуск: версия, CHANGELOG, тег vX.Y.Z, latest, push, purge jsDelivr
 ```
 
 Правила как у AnimeVost-плагина: только ES5 (никаких `=>`, `let`, `const`, шаблонных строк, `includes`, `gap:`), контроллер страницы называется `content`, данные сайта попадают в DOM только через `.text()`.
