@@ -230,8 +230,8 @@ t('parseKodikParams: urlParams, vInfo, путь скрипта плеера', fu
 t('parseNonce / parseAccountName: nonce из wfmFavorites, логин (не e-mail)', function () {
     assert.strictEqual(P.parseNonce('<script>var wfmFavorites = {"url":"https:\\/\\/doramy.club\\/wp-admin\\/admin-ajax.php","nonce":"04aca10880","postId":"61103"};</script>'), '04aca10880');
     assert.strictEqual(P.parseNonce('<html></html>'), '');
-    var prof = '<tr><th class="profpart1">Логин:</th><th class="profpart2">Mortifor</th></tr><tr><th class="profpart1">E-mail:</th><th class="profpart2">a@b.c</th></tr>';
-    assert.strictEqual(P.parseAccountName(prof), 'Mortifor');
+    var prof = '<tr><th class="profpart1">Логин:</th><th class="profpart2">SomeUser</th></tr><tr><th class="profpart1">E-mail:</th><th class="profpart2">a@b.c</th></tr>';
+    assert.strictEqual(P.parseAccountName(prof), 'SomeUser');
     assert.strictEqual(P.parseAccountName('<form id="loginform"></form>'), '');
 });
 

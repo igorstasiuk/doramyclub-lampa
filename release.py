@@ -178,7 +178,7 @@ def release(version, dry, push):
         run("git", "push", "origin", "v%s" % version)
         run("git", "push", "--force", "origin", "refs/tags/latest")
         print("Запушены main, тег v%s и latest" % version)
-        purge("1", version)
+        purge(version.split(".")[0], version)
         if shutil.which("gh"):
             run("gh", "release", "create", "v%s" % version, "--title", "v%s" % version, "--notes", section_body(read(CHANGELOG), version))
             print("Создан GitHub Release")
