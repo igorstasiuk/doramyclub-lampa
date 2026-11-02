@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-11-03
+
 ### Исправлено
 - Вставка cookie со строкой-заголовком `cookie` перед значением (как копируется из DevTools): раньше имя `wordpress_logged_in_…` портилось, и сайт не видел вход.
 - Ошибка anti-bot подсказывает причину: чужой User-Agent в `__jua_` (включите «User-Agent из cookie») или нет отметок проверки в cookie.
@@ -77,7 +79,8 @@
 - Сайт отдаёт JS-проверку браузера (anti-bot). Плагин её **не обходит**: без прокси, который её проходит, каталог не загрузится — это видно в «Диагностике».
 - Не проверено на устройстве: нативные запросы Android, реальный фокус пультом, внешние плееры, раскладка.
 
-[Unreleased]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/igorstasiuk/doramyclub-lampa/compare/v0.2.0...v0.3.0
