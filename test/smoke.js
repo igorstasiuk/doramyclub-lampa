@@ -99,7 +99,7 @@ function mk(opts) {
         ContentRows: { add: function (r) { S.rows.push(r); } },
         Component: { add: function (n, c) { S.comps[n] = c; } },
         TMDB: { api: function (u) { return 'https://tmdb.test/3/' + u; }, key: function () { return 'K'; } },
-        Listener: { follow: function () {} },
+        Listener: { follow: function (n, f) { (S.listeners = S.listeners || {})[n] = f; } },
         Reguest: function () {
             this.silent = function (u, c) {
                 S.calls.push({ u: u, tmdb: true });
@@ -576,6 +576,22 @@ function mk(opts) {
     ok(S.params && S.params.length >= 14, 'настройки зарегистрированы');
     ok(S.source && S.source.title === 'Doramy.club', 'источник глобального поиска');
     ok(S.rows.length === 4, 'ряды главного экрана (продолжить, избранное, новые серии, смотрю)');
+    (function () {
+        var root = S.$('<div><div class="full-start-new__buttons"><div class="view--torrent"></div></div></div>');
+        var ev = { type: 'complite', data: { movie: { original_name: 'Esquire' } }, object: { activity: { render: function () { return root; } } } };
+        S.listeners.full(ev);
+        S.listeners.full(ev);
+        ok(root.find('.dc-full-btn').length === 1, 'кнопка в карточке Lampa добавлена один раз');
+        ok(root.find('.view--torrent').next().hasClass('dc-full-btn'), 'кнопка стоит после «Торренты»');
+        S.pushed.length = 0;
+        root.find('.dc-full-btn').trigger('hover:enter');
+        ok(S.pushed.length === 1 && S.pushed[0].query === 'Esquire', 'кнопка открывает поиск по оригинальному названию');
+        S.store.doramy_full_btn = false;
+        var root2 = S.$('<div><div class="full-start-new__buttons"></div></div>');
+        S.listeners.full({ type: 'complite', data: { movie: { name: 'X' } }, object: { activity: { render: function () { return root2; } } } });
+        ok(root2.find('.dc-full-btn').length === 0, 'настройка отключает кнопку');
+        delete S.store.doramy_full_btn;
+    })();
 
     console.log('\n' + pass + ' ok, ' + failn + ' fail' + (errors.length ? ', JS errors: ' + errors.join('; ') : ''));
     process.exit(failn || errors.length ? 1 : 0);

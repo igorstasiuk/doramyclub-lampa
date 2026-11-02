@@ -3322,6 +3322,11 @@
         });
         Lampa.SettingsApi.addParam({
             component: 'doramyclub',
+            param: { name: 'doramy_full_btn', type: 'trigger', default: true },
+            field: { name: 'Кнопка «Doramy.club» в карточке Lampa', description: 'Открывает поиск по названию на сайте' }
+        });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
             param: { name: 'doramy_player_ask', type: 'trigger', default: false },
             field: { name: 'Спрашивать плеер при каждом запуске' }
         });
@@ -3446,6 +3451,26 @@
         };
     }
 
+    // Кнопка «Doramy.club» в полной карточке Lampa: поиск по названию (оригинал или русское) на сайте
+    function addFullButton() {
+        Lampa.Listener.follow('full', function (e) {
+            if (e.type !== 'complite' || !setting('doramy_full_btn', true)) return;
+            try {
+                var card = (e.data && e.data.movie) || (e.object && e.object.card) || {};
+                var q = card.original_title || card.original_name || card.title || card.name;
+                if (!q) return;
+                var root = e.object.activity.render();
+                if (root.find('.dc-full-btn').length) return;
+                var btn = $('<div class="full-start__button selector dc-full-btn"><span></span></div>');
+                btn.find('span').text('Doramy.club');
+                btn.on('hover:enter', function () { openSearch(q); });
+                var anchor = root.find('.view--torrent').first();
+                if (anchor.length) anchor.after(btn);
+                else root.find('.full-start-new__buttons, .full-start__buttons').first().append(btn);
+            } catch (x) { console.log('Doramy.club', 'full button failed', x); }
+        });
+    }
+
     function addGlobalSearch() {
         if (!Lampa.Search || !Lampa.Search.addSource) return;
         Lampa.Search.addSource({
@@ -3549,6 +3574,7 @@
         Lampa.Component.add('doramyclub_title', TitleComponent);
         addSettings();
         addMenu();
+        try { addFullButton(); } catch (e) { console.log('Doramy.club', 'full button unavailable', e); }
         try { addGlobalSearch(); } catch (e) { console.log('Doramy.club', 'global search unavailable', e); }
         try { addMainRows(); addMoreRows(); } catch (e) { console.log('Doramy.club', 'main rows unavailable', e); }
         document.addEventListener('visibilitychange', function () { if (!document.hidden) playingNow = false; });
