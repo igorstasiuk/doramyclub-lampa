@@ -357,6 +357,9 @@ t('parseActorsAjax / parseActorsTop / ajaxNonceExpired', function () {
     assert.strictEqual(P.ajaxNonceExpired('<li class="no-results"><b>Ошибка! Обновите страницу</b></li>'), true);
     assert.strictEqual(P.ajaxNonceExpired(F2.FAST_AKTERS), false);
     assert.deepStrictEqual(P.parseActorsTop('<html></html>', BASE), []);
+    var born = P.parseActorsTop(F2.AKTERY_BORN, BASE);
+    assert.deepStrictEqual(born.map(function (x) { return x.name + '|' + x.birth; }), ['Чжан Тянь Ян|02.11.1987', 'Ким Со Ён (1980)|02.11.1980']);
+    assert.strictEqual(born[0].photo, 'https://im.doramy.club/2026/03/chzhan-tyan-yan-340x470.jpg');
 });
 
 t('parsePodborki / parsePopular', function () {

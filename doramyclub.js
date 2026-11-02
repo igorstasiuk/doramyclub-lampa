@@ -606,8 +606,8 @@
         var i = ('' + html).indexOf('class="akt"'), out = [];
         if (i < 0) return out;
         var chunk = html.slice(i, html.indexOf('</ul>', i) < 0 ? i + 60000 : html.indexOf('</ul>', i));
-        chunk.replace(/<li><a href="([^"]*\/akter\/[^"]+)"[^>]*>\s*<img src="([^"]*)"[^>]*>\s*<b>([\s\S]*?)<\/b>/g, function (m, href, img, name) {
-            out.push({ path: href.replace(/^https?:\/\/[^\/]+/, ''), name: strip(name), photo: absUrl(img, base), birth: '' });
+        chunk.replace(/<li><a href="([^"]*\/akter\/[^"]+)"[^>]*>\s*<img src="([^"]*)"[^>]*>\s*<b>([\s\S]*?)<\/b>(?:\s*<i>([\s\S]*?)<\/i>)?/g, function (m, href, img, name, birth) {
+            out.push({ path: href.replace(/^https?:\/\/[^\/]+/, ''), name: strip(name), photo: absUrl(img, base), birth: birth ? strip(birth) : '' });
             return m;
         });
         return out;
@@ -2219,7 +2219,7 @@
             var items = [
                 { title: 'Фильтр (как на сайте)', special: 'navi' }, { title: 'Случайная дорама', special: 'rand' }, { title: 'Подборки', special: 'pod' },
                 { title: 'Новые серии' + (Object.keys(getMap('doramy_news')).length ? ' (' + Object.keys(getMap('doramy_news')).length + ')' : ''), special: 'news' },
-                { title: 'Расписание', special: 'sched' }, { title: 'Популярные актёры', special: 'actors' }
+                { title: 'Расписание', special: 'sched' }, { title: 'Популярные актёры', special: 'actors' }, { title: 'Сегодня родились', special: 'born' }
             ].concat(menu.sections.map(function (s) { return { title: s[0], path: s[1] }; }));
             items.push({ title: 'Страны ▸', group: 'countries' }, { title: 'Жанры ▸', group: 'genres' }, { title: 'Годы ▸', group: 'years' }, { title: 'Каналы ▸', group: 'channels' });
             Lampa.Select.show({
@@ -2233,6 +2233,7 @@
                         if (it.special === 'pod') return openScreen('podborki', 'Подборки');
                         if (it.special === 'news') return openScreen('news', 'Новые серии');
                         if (it.special === 'sched') return openScreen('schedule', 'Расписание');
+                        if (it.special === 'born') return openScreen('born', 'Сегодня родились');
                         return openScreen('actorsTop', 'Популярные актёры');
                     }
                     if (it.path) { back(); return openCatalog(it.path, it.title); }
@@ -2539,6 +2540,10 @@
             } else if (object.mode === 'actorsTop') {
                 fetchPage('/aktery-top', function (html) {
                     if (alive()) build([{ title: 'Популярные актёры', items: parseActorsTop(html, base()).map(actorItem) }]);
+                }, function (e) { if (alive()) fail(e); }, force);
+            } else if (object.mode === 'born') {
+                fetchPage('/aktery', function (html) {
+                    if (alive()) build([{ title: 'Сегодня родились', items: parseActorsTop(html, base()).map(actorItem) }]);
                 }, function (e) { if (alive()) fail(e); }, force);
             } else if (object.mode === 'news') {
                 checkNews(function () { if (alive()) build([{ title: 'Вышли новые серии', items: newsItems() }]); }, true);
@@ -3411,6 +3416,7 @@
             field: { name: 'Проверять новые серии', description: 'Раз в 45 минут при открытии дашборда читаются 3 страницы ленты сайта; сравниваются счётчики серий у дорам из «Смотрю», избранного и истории. Во время просмотра не запускается' }
         });
         Lampa.SettingsApi.addParam({ component: 'doramyclub', param: { name: 'doramy_row_news', type: 'trigger', default: true }, field: { name: 'Ряд «Вышли новые серии»' } });
+        Lampa.SettingsApi.addParam({ component: 'doramyclub', param: { name: 'doramy_row_born', type: 'trigger', default: true }, field: { name: 'Ряд «Сегодня родились» на главной Lampa', description: 'Актёры с днём рождения сегодня (страница сайта кешируется)' } });
         Lampa.SettingsApi.addParam({ component: 'doramyclub', param: { name: 'doramy_row_watching', type: 'trigger', default: true }, field: { name: 'Ряд «Смотрю» на главной Lampa' } });
         Lampa.SettingsApi.addParam({ component: 'doramyclub', param: { name: 'doramy_net_title', type: 'title' }, field: { name: 'Сеть' } });
         Lampa.SettingsApi.addParam({
@@ -3548,6 +3554,30 @@
                     if (!list.length) return;
                     return function (call) { call({ results: list.map(mk), title: 'Doramy.club: вышли новые серии' }); };
                 } catch (e) { console.log('Doramy.club', 'row news', e); }
+            }
+        });
+        Lampa.ContentRows.add({
+            name: 'doramyclub_born',
+            title: 'Doramy.club: сегодня родились',
+            index: 4,
+            screen: ['main'],
+            call: function () {
+                try {
+                    if (!setting('doramy_row_born', true)) return;
+                    // call обязателен в любом исходе: Lampa ждёт все ряды, иначе главная зависнет
+                    return function (call) {
+                        fetchPage('/aktery', function (html) {
+                            var list = parseActorsTop(html, base()).slice(0, 20).map(function (a) {
+                                return {
+                                    id: 'a:' + a.path, title: a.name, name: a.name, img: a.photo, poster: a.photo, source: 'doramyclub',
+                                    release_date: '', vote_average: 0,
+                                    params: { emit: { onlyEnter: function () { openCatalog(a.path, a.name); } } }
+                                };
+                            });
+                            call({ results: list, title: 'Doramy.club: сегодня родились' });
+                        }, function () { call({ results: [] }); });
+                    };
+                } catch (e) { console.log('Doramy.club', 'row born', e); }
             }
         });
         Lampa.ContentRows.add({

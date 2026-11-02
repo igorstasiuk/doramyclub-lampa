@@ -137,6 +137,7 @@ function mk(opts) {
         if (/doramy\.club\/(page\/\d+)?$/.test(u)) return '<script>var sea_ajax = {"url":"x","nonce":"beef02"};</script><a href="/genre/komediya">Комедия</a><a href="/god/2025">2025</a><a href="/strana/2-kitaj">Китай</a>' + F.CAROU + F.ACTOR_PAGE.replace(/^[\s\S]*?(<section class="post-list">)/, '$1') + (opts.homeExtra || '') + pad;
         if (/doramy\.club\/rand-cl/.test(u)) return '<script>var rand_obj = {"a_url":"x","nonce":"dead01"}</script>' + pad;
         if (/doramy\.club\/podborki-luchshix-doram/.test(u)) return F.PODBORKI + pad;
+        if (/doramy\.club\/aktery(\?|$)/.test(u)) return F.AKTERY_BORN + pad;
         if (/doramy\.club\/aktery-top/.test(u)) return F.AKTERY_TOP + pad;
         if (/doramy\.club\/akter\//.test(u)) return F.ACTOR_PAGE + pad;
         if (/doramy\.club\/navi-cl/.test(u)) return F.LISTING;
@@ -441,6 +442,11 @@ function mk(opts) {
     ok(S.pushed[S.pushed.length - 1].catalog.path === '/akter/1-son-kan', 'актёр открывает его каталог');
     m.destroy();
 
+    S = mk(); m = new S.comps.doramyclub_main({ mode: 'born' }); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-card').length === 2; }, 100), 'сегодня родились: 2 карточки');
+    ok(/02\.11\.1987/.test(S.$(m.render()).text()), 'сегодня родились: дата рождения на карточке');
+    m.destroy();
+
     S = mk(); m = new S.comps.doramyclub_main({ catalog: { path: '/akter/kim-yu-chzhon', title: 'Ким Ю Чжон', query: '' } }); m.activity = S.act; m.create();
     ok(await until(function () { return S.$(m.render()).find('.dc-actor').length === 1; }, 100), 'шапка актёра');
     ok(/Рост: 165 см/.test(S.$(m.render()).find('.dc-actor').text()) && /Ким Ю Чжон \(1999\)/.test(S.$(m.render()).find('.dc-actor').text()), 'факты актёра: рост, имя');
@@ -575,7 +581,20 @@ function mk(opts) {
     ok(S.$('.menu__list [data-action="doramyclub"]').length === 1, 'пункт меню добавлен');
     ok(S.params && S.params.length >= 14, 'настройки зарегистрированы');
     ok(S.source && S.source.title === 'Doramy.club', 'источник глобального поиска');
-    ok(S.rows.length === 4, 'ряды главного экрана (продолжить, избранное, новые серии, смотрю)');
+    ok(S.rows.length === 5, 'ряды главного экрана (продолжить, избранное, новые серии, смотрю, родились)');
+    await (async function () {
+        var row = null;
+        S.rows.forEach(function (r) { if (r.name === 'doramyclub_born') row = r; });
+        var fn = row && row.call({}, 'main'), got = null;
+        if (fn) fn(function (d) { got = d; });
+        ok(await until(function () { return got; }, 100) && got.results.length === 2 && got.results[0].title === 'Чжан Тянь Ян', 'ряд «Сегодня родились»: карточки актёров');
+        S.pushed.length = 0;
+        got.results[0].params.emit.onlyEnter();
+        ok(S.pushed.length === 1 && S.pushed[0].catalog.path === '/akter/chzhan-tyan-yan', 'карточка ряда открывает каталог актёра');
+        S.store.doramy_row_born = false;
+        ok(!row.call({}, 'main'), 'настройка отключает ряд');
+        delete S.store.doramy_row_born;
+    })();
     (function () {
         var root = S.$('<div><div class="full-start-new__buttons"><div class="view--torrent"></div></div></div>');
         var ev = { type: 'complite', data: { movie: { original_name: 'Esquire' } }, object: { activity: { render: function () { return root; } } } };
