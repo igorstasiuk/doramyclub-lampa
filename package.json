@@ -1,0 +1,13 @@
+{
+  "name": "doramyclub-lampa",
+  "private": true,
+  "description": "Doramy.club plugin for Lampa",
+  "scripts": {
+    "test": "node test/run.js && node test/smoke.js",
+    "lint": "node --check doramyclub.js"
+  },
+  "devDependencies": {
+    "jquery": "^3.7.1",
+    "jsdom": "^26.1.0"
+  }
+}
