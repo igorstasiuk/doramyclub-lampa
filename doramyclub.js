@@ -21,7 +21,13 @@
     var FALLBACK_MENU = {
         sections: [
             ['Новинки', '/1-novinki'], ['Фильмы', '/filmy'], ['Сериалы', '/serialy'],
-            ['Топ: всё время', '/top'], ['Топ месяца', '/top-months'], ['Топ года', '/top-year']
+            ['Топ: всё время', '/top'], ['Топ месяца', '/top-months'], ['Топ года', '/top-year'],
+            ['Русская озвучка', '/perevod/russkaya-ozvuchka'], ['Русские субтитры', '/perevod/subtitry'], ['Лакорны', '/lakorny'],
+            ['Вэб-дорамы', '/razdel/vertikalnye-veb-doramy'], ['Топ вэбок', '/top-vebki'], ['Топ вэбок: популярные', '/top-vebki?sort_stat=pop']
+        ],
+        channels: [
+            ['tvN', '/kanal/tvn'], ['Netflix', '/kanal/netflix'], ['Disney+', '/kanal/disney'], ['iQIYI', '/kanal/iqiyi'], ['SBS', '/kanal/sbs'],
+            ['KBS2', '/kanal/kbs2'], ['JTBC', '/kanal/jtbc']
         ],
         countries: [
             ['Южная Корея', '/strana/2-yuzhnaya-koreya'], ['Китай', '/strana/2-kitaj'], ['Япония', '/strana/1-yaponiya'],
@@ -44,11 +50,11 @@
 
     // Списки аккаунта сайта: плагин gid-favorites (WordPress admin-ajax: action + postId + security=nonce, cookie сессии)
     var LIST_ACTIONS = {
-        fav: { add: 'wfm_add', del: 'wfm_del', page: '/regs-favorit' },
-        later: { add: 'budu_add', del: 'budu_delh', page: '/regs-budu' },
-        watching: { add: 'viewed_add', del: 'viewed_delh', page: '/regs-view' },
-        done: { add: 'zakl_add', del: 'zakl_delh', page: '/regs-zakl' },
-        dropped: { add: 'broh_add', del: 'broh_delh', page: '/regs-broh' }
+        fav: { add: 'wfm_add', del: 'wfm_del', delh: 'wfm_del', page: '/regs-favorit' },
+        later: { add: 'budu_add', del: 'budu_del', delh: 'budu_delh', page: '/regs-budu' },
+        watching: { add: 'viewed_add', del: 'viewed_del', delh: 'viewed_delh', page: '/regs-view' },
+        done: { add: 'zakl_add', del: 'zakl_del', delh: 'zakl_delh', page: '/regs-zakl' },
+        dropped: { add: 'broh_add', del: 'broh_del', delh: 'broh_delh', page: '/regs-broh' }
     };
     var STATUS_PRIORITY = ['watching', 'later', 'done', 'dropped'];
 
@@ -97,6 +103,9 @@
             var avg = p.match(/class="average">\s*([\d.,]+)/);
             var hom = p.match(/<tbody class="tbody-hom">([\s\S]*?)<\/tbody>/);
             var mini = /class="mini-web"/.test(p);
+            var st = p.match(/<div class="status">([^<]*)<\/div>/);
+            var vo = hom ? hom[1].match(/Озвучка:[\s\S]*?<b>(\d+)<\/b>/) : null;
+            var su = hom ? hom[1].match(/Субтитры:[\s\S]*?<b>(\d+)<\/b>/) : null;
             out.push({
                 id: id,
                 url: absUrl(a[1], base),
@@ -108,7 +117,11 @@
                 genres: us[1] || '',
                 info: hom ? strip(hom[1].replace(/<\/tr>/g, '\n')).replace(/\n/g, ' · ') : '',
                 rating: avg ? parseFloat(avg[1].replace(',', '.')) : 0,
-                mini: mini
+                mini: mini,
+                status: st ? strip(st[1]) : '',
+                voiceEp: vo ? +vo[1] : 0,
+                subsEp: su ? +su[1] : 0,
+                mainRole: /class="main_akter"/.test(p)
             });
         }
         return out;
@@ -120,7 +133,7 @@
 
     // Меню сайта: жанры/разделы, годы, страны (для каталога); при сбое остаётся запасной список
     function parseMenu(html, base) {
-        var seen = {}, menu = { sections: FALLBACK_MENU.sections, countries: [], genres: [], years: [] };
+        var seen = {}, menu = { sections: FALLBACK_MENU.sections, channels: FALLBACK_MENU.channels, countries: [], genres: [], years: [] };
         ('' + html).replace(/<a href="(?:https?:\/\/[^\/"]+)?(\/(genre|razdel|god|strana)\/[^"]+)"[^>]*>([^<]+)<\/a>/g, function (m, path, kind, title) {
             if (seen[path]) return m;
             seen[path] = 1;
@@ -219,6 +232,25 @@
         d.note = inf ? strip(inf[1]) : '';
         var rt = html.match(/itemprop="ratingValue">\s*([\d.,]+)\s*</);
         d.rating = rt ? parseFloat(rt[1].replace(',', '.')) : 0;
+        var rcnt = html.match(/itemprop="ratingCount">\s*([^<]*)</);
+        d.ratingCount = rcnt ? parseInt(unesc(rcnt[1]).replace(/[^\d]/g, ''), 10) || 0 : 0;
+        var og = html.match(/<meta property="og:image" content="([^"]+)"/);
+        d.posterHd = og ? absUrl(og[1], base) : '';
+        d.status = d.fields['Статус'] || '';
+        d.schedule = parseSchedule(d.note);
+        var cm = parseComments(html);
+        d.comments = cm.list;
+        d.commentsClosed = cm.closed;
+        d.collections = [];
+        var pb = html.indexOf('class="podbor-s"');
+        if (pb >= 0) {
+            var pe = html.indexOf('</ul>', pb);
+            html.slice(pb, pe < 0 ? pb + 20000 : pe).replace(/<a href="([^"]*\/razdel\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/g, function (m, href, inner) {
+                var alt = inner.match(/alt="([^"]*)"/), title = strip(inner) || (alt ? strip(alt[1]) : '');
+                if (title) d.collections.push({ path: href.replace(/^https?:\/\/[^\/]+/, ''), title: title });
+                return m;
+            });
+        }
 
         var si = html.indexOf('id="owl-perelink"');
         if (si >= 0) {
@@ -249,7 +281,7 @@
                 var links = lists[t].filter(function (x) { return x; });
                 if (links.length) {
                     var tab = tabs[t] || ('Вариант ' + (t + 1));
-                    d.tracks.push({ title: tab === 'Озвучка' && d.studio ? tab + ' — ' + d.studio : tab, tab: tab, main: true, links: lists[t] });
+                    d.tracks.push({ title: tab === 'Озвучка' && d.studio ? tab + ' — ' + d.studio : tab, tab: tab, main: true, auto: tab === 'Автоперевод', links: lists[t] });
                 }
             }
         }
@@ -364,9 +396,15 @@
         return quality[keys[0]];
     }
 
-    function listPath(path, page) {
-        path = ('' + path).replace(/\/+$/, '');
-        return page > 1 ? path + '/page/' + page : path;
+    // path может уже содержать query (/top-vebki?sort_stat=pop); пагинацию собираем сами (у /navi-cl сайт ломает ссылки '#038;')
+    function listPath(path, page, query) {
+        path = '' + path;
+        var q = '', i = path.indexOf('?');
+        if (i >= 0) { q = path.slice(i + 1); path = path.slice(0, i); }
+        path = path.replace(/\/+$/, '');
+        var u = page > 1 ? path + '/page/' + page : path;
+        var all = [q, query || ''].filter(function (x) { return x; }).join('&');
+        return all ? u + '?' + all : u;
     }
 
     function searchPath(query, page) {
@@ -450,6 +488,293 @@
         return { marks: marks, ops: ops };
     }
 
+
+    /* ---------- навигатор /navi-cl, рандом, актёры, подборки (структура сняна с живого сайта 2026-11-03) ---------- */
+
+    var NAVI = {
+        razdel: [['Все разделы', ''], ['Сериалы', 'serialy'], ['Фильмы', 'filmy']],
+        strana: [['Все страны', ''], ['Южная Корея', '11'], ['Китай', '20'], ['Япония', '19'], ['Таиланд', '260'], ['Тайвань', '239'], ['Филиппины', '1210']],
+        perevod: [['Любой', ''], ['Русская озвучка', '12'], ['Русские субтитры', '23']],
+        studiya: [['Все озвучки', ''], ['STEPonee', '1118'], ['LE-Production', '3825'], ['SoftBox', '1091'], ['Дораманутая', '1433'], ['AMG', '1435'],
+            ['Green Tea', '1131'], ['DubLik-TV', '1865'], ['Храм Дорам', '1429'], ['HighHopes', '1436'], ['XDUB DORAMA', '1437'], ['Phoenixes', '1439'],
+            ['Колобок', '1494'], ['Юлия Просенюк', '1438'], ['Puski production', '1490'], ['HMP Production', '1640'], ['Light Breeze', '1936']],
+        years: [['2026', '5070'], ['2025', '4056'], ['2024', '3208'], ['2023', '1947'], ['2022', '1773'], ['2021', '1657'], ['2020', '1476'], ['2019', '1252'],
+            ['2018', '999'], ['2017', '18'], ['2016', '10'], ['2015', '21'], ['2014', '22'], ['2013', '141'], ['2012', '234'], ['2011', '108'], ['2010', '171'],
+            ['2009', '127'], ['2008', '231'], ['2007', '165'], ['2006', '226'], ['2005', '916'], ['2004', '597'], ['2003', '326']],
+        genres: [['Боевики', '3'], ['Боевые искусства', '39'], ['Военные', '28'], ['Детективы', '13'], ['Драмы', '4'], ['Исторические', '38'], ['Комедии', '25'],
+            ['Криминал', '27'], ['Мелодрама', '5'], ['Мистика', '35'], ['Музыка', '29'], ['Приключения', '14'], ['Спорт', '26'], ['Ток-шоу', '31'],
+            ['Триллеры', '15'], ['Ужасы', '32'], ['Фантастика', '37'], ['Фэнтези', '36']]
+    };
+
+    var RAND = {
+        category: [['Всё', ''], ['Сериалы', 'serialy'], ['Фильмы', 'filmy']],
+        country: [['Любая', ''], ['Корея', 'koreya'], ['Китай', 'kitaj'], ['Япония', 'yaponiya'], ['Таиланд', 'tailand'], ['Тайвань', 'tajvan']],
+        perevod: [['Любой', ''], ['Озвучка', 'ozvuchka'], ['Субтитры', 'subtitry']],
+        period: [['Любой', ''], ['До 2010', 'until-2010'], ['2010–2015', 'from-10-15'], ['2016–2020', 'from-16-20'], ['2021–2026', 'from-21-26']]
+    };
+
+    var COUNTRY_FILTER = [['Все страны', ''], ['Корея', 'koreya'], ['Китай', 'kitaj'], ['Япония', 'yaponiya']];
+
+    // Строка запроса /navi-cl. f: { razdel, strana, perevod, studiya, years[], genres[], genresAnd, exclude[], sortRating, released, noMini }
+    function naviQuery(f) {
+        f = f || {};
+        var p = [];
+        var add = function (k, v) { if (v !== '' && v !== undefined && v !== null) p.push(encodeURIComponent(k) + '=' + encodeURIComponent(v)); };
+        add('razdel', f.razdel); add('tax_strana', f.strana); add('tax_perevod', f.perevod); add('tax_studiya', f.studiya);
+        (f.years || []).forEach(function (y) { add('tax_god[]', y); });
+        (f.genres || []).forEach(function (g) { add('tag_zhanr[]', g); });
+        if (f.genresAnd && f.genres && f.genres.length > 1) add('zhanr_sort', 'and');
+        (f.exclude || []).forEach(function (g) { add('tag_id[]', g); });
+        if (f.sortRating) add('sort_rai', 'ratings');
+        if (f.released) add('sort_stat', 'released');
+        if (f.noMini) add('mini_dor', 'exclude');
+        return p.join('&');
+    }
+
+    function optionLabel(list, value) {
+        for (var i = 0; i < list.length; i++) if (list[i][1] === value) return list[i][0];
+        return '';
+    }
+
+    function optionLabels(list, values) {
+        return (values || []).map(function (v) { return optionLabel(list, v); }).filter(function (x) { return x; });
+    }
+
+    function naviTitle(f) {
+        var parts = [];
+        if (f.razdel) parts.push(optionLabel(NAVI.razdel, f.razdel));
+        if (f.strana) parts.push(optionLabel(NAVI.strana, f.strana));
+        if (f.perevod) parts.push(optionLabel(NAVI.perevod, f.perevod));
+        if (f.studiya) parts.push(optionLabel(NAVI.studiya, f.studiya));
+        if (f.years && f.years.length) parts.push(optionLabels(NAVI.years, f.years).join(', '));
+        if (f.genres && f.genres.length) parts.push(optionLabels(NAVI.genres, f.genres).join(f.genresAnd ? ' + ' : ' / '));
+        if (f.sortRating) parts.push('по рейтингу');
+        return 'Фильтр' + (parts.length ? ': ' + parts.join(' · ') : '');
+    }
+
+    function parseRandNonce(html) {
+        var m = ('' + html).match(/rand_obj\s*=\s*\{[^}]*?"nonce"\s*:\s*"([a-f0-9]+)"/);
+        return m ? m[1] : '';
+    }
+
+    function parseSeaNonce(html) {
+        var m = ('' + html).match(/sea_ajax\s*=\s*\{[^}]*?"nonce"\s*:\s*"([a-f0-9]+)"/);
+        return m ? m[1] : '';
+    }
+
+    // Ответ rand_posts: карточка (section.post-list) + section.info-rand (тип, главные роли, описание, подборки)
+    function parseRandom(html, base) {
+        html = '' + html;
+        var items = parseListing(html, base);
+        if (!items.length) return null;
+        var it = items[0];
+        var rows = [];
+        (html.match(/<tbody class="tbody-rand">[\s\S]*?<\/tbody>/) || [''])[0].replace(/<td class="i1">([\s\S]*?)<\/td><td>([\s\S]*?)<\/td>/g, function (m, a, b) {
+            rows.push(strip(a) + ' ' + strip(b));
+            return m;
+        });
+        it.info = rows.join(' · ');
+        var info = html.match(/<section class="info-rand">([\s\S]*?)<\/section>/);
+        var inner = info ? info[1] : '';
+        var roles = [];
+        inner.replace(/<span data-img="([^"]*)">([\s\S]*?)<\/span>/g, function (m, img, name) {
+            var n = strip(name).replace(/,\s*$/, '');
+            if (n) roles.push({ name: n, photo: absUrl(img, base) });
+            return m;
+        });
+        var pm = inner.match(/<p>([\s\S]*?)<\/p>/), kind = inner.match(/class="rand-sr">([^<]*)/);
+        var collections = [];
+        (inner.match(/class="rand-pod">[\s\S]*$/) || [''])[0].replace(/<li>([\s\S]*?)<\/li>/g, function (m, t) { collections.push(strip(t)); return m; });
+        return { item: it, roles: roles, descr: pm ? strip(pm[1]) : '', kind: kind ? strip(kind[1]) : '', collections: collections };
+    }
+
+    // Быстрый поиск: «Ошибка! Обновите страницу» = nonce протух
+    function ajaxNonceExpired(html) {
+        return /Обновите страницу/.test('' + html);
+    }
+
+    function parseActorsAjax(html, base) {
+        var out = [];
+        ('' + html).replace(/<li><a href="([^"]*\/akter\/[^"]+)"[^>]*>\s*<img src="([^"]*)"[^>]*>\s*<span class="ajax-search-title">([\s\S]*?)<\/span>\s*(?:<u>([\s\S]*?)<\/u>)?/g, function (m, href, img, name, birth) {
+            out.push({ path: href.replace(/^https?:\/\/[^\/]+/, ''), name: strip(name), photo: absUrl(img, base), birth: birth ? strip(birth) : '' });
+            return m;
+        });
+        return out;
+    }
+
+    function parseActorsTop(html, base) {
+        var i = ('' + html).indexOf('class="akt"'), out = [];
+        if (i < 0) return out;
+        var chunk = html.slice(i, html.indexOf('</ul>', i) < 0 ? i + 60000 : html.indexOf('</ul>', i));
+        chunk.replace(/<li><a href="([^"]*\/akter\/[^"]+)"[^>]*>\s*<img src="([^"]*)"[^>]*>\s*<b>([\s\S]*?)<\/b>/g, function (m, href, img, name) {
+            out.push({ path: href.replace(/^https?:\/\/[^\/]+/, ''), name: strip(name), photo: absUrl(img, base), birth: '' });
+            return m;
+        });
+        return out;
+    }
+
+    // Шапка страницы актёра: фото и таблица «Дорам / ДР / Зодиак / Рост / Страна»
+    function parseActor(html, base) {
+        html = '' + html;
+        var h1 = html.match(/<section class="akter-st">\s*<h1>([\s\S]*?)<\/h1>/);
+        if (!h1) return null;
+        var img = html.match(/class="akter-poster">\s*<img src="([^"]+)"/);
+        var facts = [];
+        html.replace(/<td colspan="2" class="i-akter">([\s\S]*?)<\/td><td>([\s\S]*?)<\/td>/g, function (m, a, b) {
+            facts.push([strip(a).replace(/:$/, ''), strip(b)]);
+            return m;
+        });
+        return { name: strip(h1[1]), photo: img ? absUrl(img[1], base) : '', facts: facts };
+    }
+
+    function parsePodborki(html, base) {
+        var i = ('' + html).indexOf('class="podborki"'), out = [];
+        if (i < 0) return out;
+        var e = html.indexOf('</ul>', i), chunk = html.slice(i, e < 0 ? i + 80000 : e);
+        chunk.replace(/<li><a href="([^"]*\/razdel\/[^"]+)"[^>]*>\s*<img src="([^"]*)"[^>]*>\s*<span>([\s\S]*?)<\/span>/g, function (m, href, img, t) {
+            out.push({ path: href.replace(/^https?:\/\/[^\/]+/, ''), poster: absUrl(img, base), title: strip(t) });
+            return m;
+        });
+        return out;
+    }
+
+    // Карусель «популярное сейчас» на главной
+    function parsePopular(html, base) {
+        var i = ('' + html).indexOf('id="owl-carou"'), out = [];
+        if (i < 0) return out;
+        var chunk = html.slice(i, i + 30000), nx = chunk.indexOf('</section>');
+        if (nx > 0) chunk = chunk.slice(0, nx);
+        chunk.replace(/<a href="([^"]+\.html)"[^>]*>\s*<img src="([^"]+)"[^>]*>\s*<div class="pe-title">([\s\S]*?)<\/div>(?:\s*<div class="s-average">([\d.,]+)<\/div>)?/g, function (m, href, img, t, avg) {
+            var id = postId(href);
+            if (id) out.push({ id: id, url: absUrl(href, base), poster: absUrl(img, base), title: strip(t), orig: '', country: '', year: 0, genres: '', info: '', rating: avg ? parseFloat(avg.replace(',', '.')) : 0, mini: false, status: '', voiceEp: 0, subsEp: 0 });
+            return m;
+        });
+        return out;
+    }
+
+    // Инлайн-комментарии со страницы тайтла (только чтение)
+    function parseComments(html) {
+        html = '' + html;
+        var out = [], closed = /Отзывы к данной дораме уже закрыты/.test(html);
+        var i = html.indexOf('class="commentlist"');
+        if (i >= 0) {
+            var chunk = html.slice(i, i + 120000);
+            chunk.replace(/<div class="ct-author">([\s\S]*?)<\/div>\s*<div class="ct-ti">([\s\S]*?)<\/div>[\s\S]*?<div class="comment-text-content">([\s\S]*?)<\/div>\s*<\/div>/g, function (m, a, d, t) {
+                var text = strip(t);
+                if (text && out.length < 50) out.push({ author: strip(a), date: strip(d), text: text });
+                return m;
+            });
+        }
+        return { list: out, closed: closed };
+    }
+
+    // «Выходит по субботам и воскресеньям» → { days: [5, 6] } (понедельник = 0)
+    var DAY_RE = [[/понедельник/i, 0], [/вторник/i, 1], [/сред[аыуе]/i, 2], [/четверг/i, 3], [/пятниц/i, 4], [/суббот/i, 5], [/воскресень/i, 6]];
+
+    function parseSchedule(text) {
+        text = '' + (text || '');
+        var days = [];
+        DAY_RE.forEach(function (d) { if (d[0].test(text)) days.push(d[1]); });
+        return days.length ? { days: days, text: text } : null;
+    }
+
+    // Состояние тайтла в списке по кнопкам страницы: data-action="del" — уже в списке, "add" — нет
+    var LIST_CLASS = { fav: 'fav-linkhome', later: 'budu-link', watching: 'viewed-link', done: 'zakl-link', dropped: 'broh-link' };
+
+    function parseListState(html, kind) {
+        var cls = LIST_CLASS[kind];
+        if (!cls) return null;
+        var m = ('' + html).match(new RegExp('<a\\b[^>]*class="' + cls + '"[^>]*>'));
+        if (!m) return null;
+        var a = m[0].match(/data-action="(add|del)"/);
+        return a ? (a[1] === 'del' ? 'in' : 'out') : null;
+    }
+
+    // Анализ вставленной cookie без раскрытия значений: что в ней есть и совпадает ли UA с тем, что шлёт плагин
+    function analyzeCookie(str, ua) {
+        var names = [], jua = null;
+        ('' + (str || '')).split(';').forEach(function (part) {
+            var i = part.indexOf('=');
+            var name = (i < 0 ? part : part.slice(0, i)).trim();
+            if (!name) return;
+            names.push(name);
+            if (name === '__jua_' && i >= 0) { try { jua = decodeURIComponent(part.slice(i + 1).trim()); } catch (e) { jua = part.slice(i + 1).trim(); } }
+        });
+        return {
+            names: names,
+            hasSession: names.some(function (n) { return /^wordpress_logged_in_/.test(n); }),
+            hasAntibot: names.some(function (n) { return /^__(js_p_|jhash_|jua_|hash_|lhash_)/.test(n); }),
+            jua: jua,
+            uaMatch: jua === null ? null : jua === ua
+        };
+    }
+
+    // Строка Cookie из DevTools/буфера обмена → чистая «a=b; c=d» (убираем префикс «Cookie:», кавычки, переводы строк)
+    function normalizeCookie(str) {
+        var t = ('' + (str || '')).replace(/[\r\n]+/g, ' ').trim();
+        t = t.replace(/^-H\s+/i, '').replace(/^["']+|["']+$/g, '').trim();
+        t = t.replace(/^cookie\s*:\s*/i, '');
+        return t.split(/\s*;\s*/).filter(function (x) { return x && x.indexOf('=') > 0; }).join('; ');
+    }
+
+    function maskCookie(str) {
+        return analyzeCookie(str, '').names.map(function (n) { return n + '=***'; }).join('; ');
+    }
+
+    // Новые серии: сравнение счётчиков из ленты сайта с тем, что пользователь уже видел.
+    //   seen    — { id: { v, s } }, current — { id: { voiceEp, subsEp, item } }, ids — { id: true } (что отслеживаем)
+    // Возвращает { news: { id: { item, v, s, dv, ds } }, seen } (seen с добавленными базовыми значениями).
+    function detectNews(seen, current, ids) {
+        var news = {}, nextSeen = {}, id;
+        for (id in seen) if (seen.hasOwnProperty(id)) nextSeen[id] = seen[id];
+        for (id in ids) {
+            if (!ids.hasOwnProperty(id) || !current[id]) continue;
+            var c = current[id], sn = nextSeen[id];
+            if (!sn) { nextSeen[id] = { v: c.voiceEp || 0, s: c.subsEp || 0 }; continue; }
+            var dv = (c.voiceEp || 0) - (sn.v || 0), ds = (c.subsEp || 0) - (sn.s || 0);
+            if (dv > 0 || ds > 0) news[id] = { item: c.item, v: c.voiceEp || 0, s: c.subsEp || 0, dv: Math.max(0, dv), ds: Math.max(0, ds) };
+        }
+        return { news: news, seen: nextSeen };
+    }
+
+    var DAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+
+    // «1:30-2:45» → { start: 90, end: 165 }
+    function parseSkip(text) {
+        var m = ('' + (text || '')).match(/^\s*(\d+):(\d{2})\s*[-–—]\s*(\d+):(\d{2})\s*$/);
+        if (!m) return null;
+        var a = +m[1] * 60 + +m[2], b = +m[3] * 60 + +m[4];
+        return b > a ? { start: a, end: b } : null;
+    }
+
+    // Страна как параметр раздела: /genre/*, /god/* — ?st_strana=, /1-novinki — ?st_sort=
+    function countryParam(path) {
+        if (/^\/(genre|god)\//.test(path)) return 'st_strana';
+        if (/^\/1-novinki/.test(path)) return 'st_sort';
+        return '';
+    }
+
+    function queryValue(q, name) {
+        var m = ('&' + (q || '')).match(new RegExp('&' + name + '=([^&]*)'));
+        return m ? decodeURIComponent(m[1]) : '';
+    }
+
+    function setQueryValue(q, name, value) {
+        var parts = (q || '').split('&').filter(function (x) { return x && x.indexOf(name + '=') !== 0; });
+        if (value) parts.push(name + '=' + encodeURIComponent(value));
+        return parts.join('&');
+    }
+
+    function cardBadge(t) {
+        var p = [];
+        if (t.status) p.push(t.status);
+        var c = [];
+        if (t.voiceEp) c.push('оз.' + t.voiceEp);
+        if (t.subsEp) c.push('сб.' + t.subsEp);
+        if (c.length) p.push(c.join('/'));
+        return p.join(' · ') || (t.mini ? 'Мини' : '') || t.info || '';
+    }
+
     function looksLikeChallenge(html) {
         html = '' + html;
         return html.indexOf('__js_p_') >= 0 && html.indexOf('get_jhash') >= 0 && html.indexOf('post-list') < 0;
@@ -461,7 +786,11 @@
             parseDetail: parseDetail, parseKodikLink: parseKodikLink, kodikUrl: kodikUrl, parseKodikPage: parseKodikPage,
             parseKodikParams: parseKodikParams, decodeKodik: decodeKodik, parseFtor: parseFtor, pickQuality: pickQuality,
             listPath: listPath, searchPath: searchPath, fmtTime: fmtTime, looksLikeChallenge: looksLikeChallenge, strip: strip,
-            LIST_ACTIONS: LIST_ACTIONS, parseNonce: parseNonce, parseAccountName: parseAccountName, parseAccountList: parseAccountList, mergeMarks: mergeMarks
+            LIST_ACTIONS: LIST_ACTIONS, NAVI: NAVI, RAND: RAND, naviQuery: naviQuery, naviTitle: naviTitle, optionLabel: optionLabel, parseRandNonce: parseRandNonce, parseSeaNonce: parseSeaNonce,
+            parseRandom: parseRandom, ajaxNonceExpired: ajaxNonceExpired, parseActorsAjax: parseActorsAjax, parseActorsTop: parseActorsTop, parseActor: parseActor,
+            parsePodborki: parsePodborki, parsePopular: parsePopular, parseComments: parseComments, parseSchedule: parseSchedule, parseListState: parseListState,
+            parseSkip: parseSkip, countryParam: countryParam, queryValue: queryValue, setQueryValue: setQueryValue, DAY_NAMES: DAY_NAMES, COUNTRY_FILTER: COUNTRY_FILTER,
+            analyzeCookie: analyzeCookie, maskCookie: maskCookie, normalizeCookie: normalizeCookie, detectNews: detectNews, cardBadge: cardBadge, parseNonce: parseNonce, parseAccountName: parseAccountName, parseAccountList: parseAccountList, mergeMarks: mergeMarks
         };
     }
 
@@ -494,9 +823,38 @@
         return v === '' ? def : v;
     }
 
-    function base() {
-        var url = ('' + setting('doramy_base', DEFAULT_BASE)).trim().replace(/\/+$/, '');
+    function normalizeBase(url) {
+        url = ('' + url).trim().replace(/\/+$/, '');
         return /^https?:\/\//i.test(url) ? url : 'https://' + url.replace(/^\/+/, '');
+    }
+
+    function configuredBase() { return normalizeBase(setting('doramy_base', DEFAULT_BASE)); }
+
+    // Зеркала добавляет только пользователь (на сайте есть фишинговые клоны, свой список плагин не публикует)
+    function mirrors() {
+        var out = [];
+        ('' + setting('doramy_mirrors', '')).split(/[\s,;]+/).forEach(function (u) { if (u) out.push(normalizeBase(u)); });
+        return out;
+    }
+
+    var activeBase = '';
+
+    function base() { return activeBase || configuredBase(); }
+
+    function hostOf(u) {
+        var m = ('' + u).match(/^https?:\/\/([^\/:?#]+)/i);
+        return m ? m[1].toLowerCase() : '';
+    }
+
+    // Абсолютные ссылки из кеша (https://doramy.club/...) переписываем на активный адрес (зеркало)
+    function rebase(url) {
+        var h = hostOf(url);
+        if (!h) return url;
+        var known = [configuredBase()].concat(mirrors());
+        for (var i = 0; i < known.length; i++) {
+            if (hostOf(known[i]) === h) return base() + url.replace(/^https?:\/\/[^\/]+/, '');
+        }
+        return url;
     }
 
     function getMap(key) {
@@ -659,8 +1017,39 @@
 
     // Запрос текста. Порядок: прокси из настроек → нативный запрос Lampa (Android, без CORS) → прямой $.ajax.
     // opts.post — строка application/x-www-form-urlencoded.
+    // Очередь запросов к сайту: не больше 2 одновременных и пауза между стартами (настройка doramy_gap, мс) — не нагружаем сайт и слабые ТВ
+    var sq = [], sqBusy = 0, sqLast = 0, sqTimer = null;
+
+    function siteQueue(fn) {
+        sq.push(fn);
+        sqPump();
+    }
+
+    function sqPump() {
+        if (sqTimer || sqBusy >= 2 || !sq.length) return;
+        var gap = parseInt(setting('doramy_gap', 350), 10) || 0, wait = sqLast + gap - Date.now();
+        if (wait > 0) {
+            sqTimer = setTimeout(function () { sqTimer = null; sqPump(); }, wait);
+            return;
+        }
+        var fn = sq.shift(), released = false;
+        sqBusy++;
+        sqLast = Date.now();
+        try {
+            fn(function () { if (!released) { released = true; sqBusy--; sqPump(); } });
+        } catch (e) { if (!released) { released = true; sqBusy--; } }
+        if (sq.length) sqPump();
+    }
+
+    // Запрос текста. Порядок: прокси из настроек → нативный запрос Lampa (Android, без CORS) → прямой $.ajax.
+    // opts.post — строка application/x-www-form-urlencoded; opts.site — запрос к сайту (очередь, cookie аккаунта).
     function net(url, opts, ok, fail) {
         opts = opts || {};
+        if (opts.site && !opts._q) {
+            return siteQueue(function (release) {
+                net(url, $.extend({}, opts, { _q: 1 }), function (r) { release(); ok(r); }, function (e) { release(); fail(e); });
+            });
+        }
         var proxy = ('' + setting('doramy_proxy', '')).trim();
         var ajax = function (u, err) {
             $.ajax({
@@ -676,37 +1065,75 @@
         var direct = function () { ajax(url, function (e) { fail(e); }); };
         if (proxy) return ajax(proxy + url, function () { fail('proxy'); });
         try {
-            var headers = { 'User-Agent': DESKTOP_UA };
+            var headers = { 'User-Agent': opts.site ? siteUA() : DESKTOP_UA };
             if (opts.post) {
                 headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
                 headers['X-Requested-With'] = 'XMLHttpRequest';
             }
             if (opts.referer) headers.Referer = opts.referer;
-            if (opts.site && cookie()) headers.Cookie = cookie();
+            // cookie аккаунта — только на адрес сайта из настроек (не на Kodik, не на зеркала)
+            if (opts.site && cookie() && hostOf(url) === hostOf(configuredBase())) headers.Cookie = cookie();
             new Lampa.Reguest().native(url, function (str) {
                 typeof str === 'string' ? ok(str) : direct();
             }, direct, opts.post || false, { dataType: 'text', headers: headers });
         } catch (e) { direct(); }
     }
 
-    var pageMem = {};
+    var pageMem = {}, offlineNoted = false;
 
-    // Страница сайта (HTML). Проверка на «проверку браузера» сайта — отдельная ошибка, чтобы показать понятное сообщение.
-    function fetchPage(path, ok, fail, force) {
-        var url = absUrl(path, base());
-        var hit = pageMem[url];
-        if (!force && hit && Date.now() - hit.ts < CACHE_TTL) return ok(hit.html);
-        net(url, { referer: base() + '/', site: true }, function (html) {
-            if (looksLikeChallenge(html)) return fail('challenge');
-            if (typeof html !== 'string' || html.length < 500) return fail('empty');
-            pageMem[url] = { ts: Date.now(), html: html };
-            ok(html);
-        }, function (e) { fail(e || 'error'); });
+    // Офлайн-кеш страниц: последние 80 страниц в IndexedDB (LRU), читаем только если сеть недоступна
+    function pageKey(pkey) { return 'doramy_pg_' + Lampa.Utils.hash(pkey); }
+
+    function pageStore(pkey, html) {
+        if (typeof html !== 'string' || html.length > 400000) return;
+        var key = pageKey(pkey), idx = Lampa.Storage.get('doramy_pg_idx', '[]');
+        if (!$.isArray(idx)) idx = [];
+        idx = $.grep(idx, function (k) { return k !== key; });
+        idx.push(key);
+        while (idx.length > 80) bigSet(idx.shift(), {});
+        Lampa.Storage.set('doramy_pg_idx', idx);
+        bigSet(key, { ts: Date.now(), html: html });
     }
 
-    function loadList(path, page, ok, fail, force) {
-        fetchPage(listPath(path, page), function (html) {
-            ok(parseListing(html, base()), hasNext(html));
+    function pageLoad(pkey, cb) {
+        bigGet(pageKey(pkey), function (v) { cb(v && v.html ? v.html : null); });
+    }
+
+    // Страница сайта (HTML). Заглушка проверки браузера — отдельная ошибка. При сбое пробуем зеркала, затем офлайн-кеш.
+    // ok(html, offline)
+    function fetchPage(path, ok, fail, force, st) {
+        st = st || { tried: 0, challenge: false };
+        var url = rebase(absUrl(path, base())), pkey = url.replace(/^https?:\/\/[^\/]+/, '');
+        var hit = pageMem[pkey];
+        if (!force && hit && Date.now() - hit.ts < CACHE_TTL) return ok(hit.html, false);
+        var failed = function (e) {
+            if (e === 'challenge') st.challenge = true;
+            var order = [configuredBase()].concat(mirrors());
+            st.tried++;
+            if (order.length > 1 && st.tried < order.length) {
+                activeBase = order[(order.indexOf(base()) + 1) % order.length];
+                return fetchPage(path, ok, fail, force, st);
+            }
+            activeBase = '';
+            var err = st.challenge ? 'challenge' : (e || 'error');
+            pageLoad(pkey, function (html) {
+                if (!html) return fail(err);
+                if (!offlineNoted) { offlineNoted = true; Lampa.Noty.show('Doramy.club: нет связи с сайтом, показан офлайн-кеш'); }
+                ok(html, true);
+            });
+        };
+        net(url, { referer: base() + '/', site: true }, function (html) {
+            if (looksLikeChallenge(html)) return failed('challenge');
+            if (typeof html !== 'string' || html.length < 500) return failed('empty');
+            pageMem[pkey] = { ts: Date.now(), html: html };
+            pageStore(pkey, html);
+            ok(html, false);
+        }, function (e) { failed(e || 'error'); });
+    }
+
+    function loadList(path, page, ok, fail, force, query) {
+        fetchPage(listPath(path, page, query), function (html) {
+            ok(parseListing(html, base()), hasNext(html), html);
         }, fail, force);
     }
 
@@ -854,23 +1281,24 @@
 
     function markChanged(id, before, after) {
         if (!accountOn()) return;
-        if (!!before.fav !== !!after.fav) syncEnqueue(id, 'fav', after.fav ? 'add' : 'del');
+        var url = (after.item && after.item.url) || (before.item && before.item.url) || '';
+        if (!!before.fav !== !!after.fav) syncEnqueue(id, 'fav', after.fav ? 'add' : 'del', url);
         if ((before.status || '') !== (after.status || '')) {
-            if (before.status) syncEnqueue(id, before.status, 'del');
-            if (after.status) syncEnqueue(id, after.status, 'add');
+            if (before.status) syncEnqueue(id, before.status, 'del', url);
+            if (after.status) syncEnqueue(id, after.status, 'add', url);
         }
     }
 
-    function syncEnqueue(id, kind, op) {
+    function syncEnqueue(id, kind, op, url) {
         var s = syncState();
         // add, за которым сразу идёт del того же (и наоборот), взаимно гасятся
         var last = s.queue[s.queue.length - 1];
         if (last && last.id === id && last.kind === kind && last.op !== op) s.queue.pop();
-        else s.queue.push({ id: id, kind: kind, op: op, ts: Date.now(), tries: 0 });
+        else s.queue.push({ id: id, kind: kind, op: op, url: url || '', ts: Date.now(), tries: 0 });
         saveSync(s);
         clearTimeout(flushTimer);
         flushTimer = setTimeout(function () {
-            flushQueue(function (okAll) { if (!okAll) Lampa.Noty.show('Doramy.club: не удалось отправить изменения на сайт, повторю при следующей синхронизации'); });
+            flushQueue(function (okAll, paused) { if (!okAll && !paused) Lampa.Noty.show('Doramy.club: не удалось отправить изменения на сайт, повторю при следующей синхронизации'); });
         }, 1500);
     }
 
@@ -885,15 +1313,14 @@
         }, function (e) { fail(e || 'error'); });
     }
 
-    // Одно действие над списком: admin-ajax.php, action = wfm_add / budu_delh / ...
-    function siteAction(kind, op, id, ok, fail, retried) {
-        var a = LIST_ACTIONS[kind];
-        if (!a) return fail('rejected');
+    // Одно действие admin-ajax.php (action = wfm_add / budu_del / ...). Успех на сайте определяем по ответу, а затем подтверждаем состоянием кнопки на странице тайтла.
+    function ajaxCall(action, id, ok, fail, retried) {
         getNonce(function (nonce) {
-            net(absUrl('/wp-admin/admin-ajax.php', base()), { site: true, referer: base() + '/', post: enc({ security: nonce, action: a[op], postId: id }) }, function (res) {
+            net(absUrl('/wp-admin/admin-ajax.php', base()), { site: true, referer: base() + '/', post: enc({ security: nonce, action: action, postId: id }) }, function (res) {
+                if (looksLikeChallenge(res)) return fail('challenge');
                 var t = ('' + res).trim();
                 if (t === '-1' || t === '0') {
-                    if (!retried) { nonceMem = null; return siteAction(kind, op, id, ok, fail, true); }
+                    if (!retried) { nonceMem = null; return ajaxCall(action, id, ok, fail, true); }
                     return fail('rejected');
                 }
                 ok();
@@ -901,10 +1328,128 @@
         }, function (e) { fail(e); }, !!retried);
     }
 
-    // Отправляет очередь по одной операции. Операция, которую сайт два раза отклонил или которая не прошла 5 раз, отбрасывается.
+    // true/false — кнопка на странице тайтла подтверждает/опровергает состояние; null — проверить нельзя (нет адреса страницы, нет кнопки)
+    function verifyState(kind, id, want, url, cb) {
+        url = url || (getMap('doramy_state')[id] || {}).url;
+        if (!url) return cb(null);
+        net(rebase(url), { site: true, referer: base() + '/' }, function (html) {
+            if (looksLikeChallenge(html)) return cb(null);
+            var st = parseListState(html, kind);
+            cb(st === null ? null : (st === 'in') === (want === 'add'));
+        }, function () { cb(null); });
+    }
+
+    // Удаление пробуем двумя вариантами: как со страницы тайтла (*_del), затем как со страницы списка (*_delh)
+    function siteAction(kind, op, id, ok, fail, url) {
+        var a = LIST_ACTIONS[kind];
+        if (!a) return fail('rejected');
+        var variants = op === 'add' ? [a.add] : (a.delh && a.delh !== a.del ? [a.del, a.delh] : [a.del]);
+        (function next(i) {
+            ajaxCall(variants[i], id, function () {
+                verifyState(kind, id, op, url, function (good) {
+                    if (good === false) return i + 1 < variants.length ? next(i + 1) : fail('rejected');
+                    ok();
+                });
+            }, fail);
+        })(0);
+    }
+
+    /* ---------- получение и обновление cookie ---------- */
+
+    // Сайт привязывает проверку браузера к User-Agent браузера (cookie __jua_). Плагин по умолчанию шлёт свой UA; по явной настройке
+    // отправляет UA того браузера, из которого вы сами взяли cookie. Подбора или подделки отпечатков плагин не делает.
+    function siteUA() {
+        if (setting('doramy_use_cookie_ua', false)) {
+            var j = analyzeCookie(cookie(), '').jua;
+            if (j) return j;
+        }
+        return DESKTOP_UA;
+    }
+
+    function storeCookie(str) {
+        var c = normalizeCookie(str);
+        if (!c) return false;
+        Lampa.Storage.set('doramy_cookie', c);
+        Lampa.Storage.set('doramy_cookie_ts', Date.now());
+        nonceMem = null;
+        pushCred();
+        return true;
+    }
+
+    /* ---------- перенос между устройствами (Mac ↔ приставка) через аккаунт Lampa (CUB) ---------- */
+
+    // Строку cookie не набирают на приставке: вставьте её на Mac, включите перенос — на приставке она появится после синхронизации
+    // хранилища Lampa. Это опция: cookie тогда хранится на серверах CUB в вашем аккаунте. По умолчанию выключено.
+    function pushCred() {
+        if (!setting('doramy_cub_cookie', false) || !Lampa.Storage.sync) return;
+        var c = cookie();
+        if (!c) return;
+        var cred = getMap('doramy_cred');
+        if (cred.cookie && cred.cookie.v === c) return;
+        cred.cookie = { v: c, ts: Lampa.Storage.get('doramy_cookie_ts', 0) || Date.now() };
+        Lampa.Storage.set('doramy_cred', cred);
+    }
+
+    function initCubSync() {
+        if (!Lampa.Storage || !Lampa.Storage.sync) return;
+        try {
+            if (setting('doramy_cub_lists', false)) {
+                Lampa.Storage.sync('doramy_marks', 'object_object');
+                Lampa.Storage.sync('doramy_state', 'object_object');
+            }
+            if (setting('doramy_cub_cookie', false)) {
+                Lampa.Storage.sync('doramy_cred', 'object_object');
+                var remote = getMap('doramy_cred').cookie;
+                var localTs = Lampa.Storage.get('doramy_cookie_ts', 0) || 0;
+                if (remote && remote.v && (!cookie() || (remote.ts || 0) > localTs) && remote.v !== cookie()) {
+                    Lampa.Storage.set('doramy_cookie', remote.v);
+                    Lampa.Storage.set('doramy_cookie_ts', remote.ts || Date.now());
+                    nonceMem = null;
+                } else pushCred();
+            }
+        } catch (e) { console.log('Doramy.club', 'CUB sync unavailable', e); }
+    }
+
+    function onCubToggle() {
+        // выключили перенос cookie — убираем её из облака
+        if (!setting('doramy_cub_cookie', false)) {
+            try { if (Lampa.Storage.clean) Lampa.Storage.clean('doramy_cred'); } catch (e) { /* нет синхронизации */ }
+            Lampa.Storage.set('doramy_cred', {});
+        }
+        initCubSync();
+    }
+
+    function pasteCookie() {
+        var done = function (t) {
+            if (!storeCookie(t)) return Lampa.Noty.show('В буфере обмена нет строки Cookie');
+            Lampa.Noty.show('Cookie вставлена (' + analyzeCookie(cookie(), '').names.length + ' шт.). Нажмите «Проверить вход»');
+        };
+        try {
+            if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {
+                return navigator.clipboard.readText().then(done, function () { Lampa.Noty.show('Нет доступа к буферу обмена: разрешите его в браузере'); });
+            }
+        } catch (e) { /* нет буфера */ }
+        Lampa.Noty.show('Буфер обмена недоступен на этом устройстве — введите cookie вручную или включите перенос через аккаунт Lampa');
+    }
+
+    function cookieAgeText() {
+        var ts = Lampa.Storage.get('doramy_cookie_ts', 0);
+        if (!ts) return 'неизвестно';
+        var h = Math.round((Date.now() - ts) / 3600000);
+        return h < 1 ? 'меньше часа назад' : h + ' ч назад';
+    }
+
+    function notifyPaused(why) {
+        Lampa.Noty.show(why === 'noauth' ? 'Doramy.club: сессия истекла — вставьте новый cookie в настройках, синхронизация приостановлена' : 'Doramy.club: сайт требует проверку браузера, синхронизация приостановлена');
+    }
+
+    // Отправляет очередь по одной операции. Заглушка проверки браузера и истёкшая сессия ставят синк на паузу (очередь не теряется);
+    // операция, которую сайт два раза отклонил или которая не прошла 5 раз, отбрасывается.
     function flushQueue(done) {
         if (flushing) return done && done(false);
-        if (!syncState().queue.length) return done && done(true);
+        var s0 = syncState();
+        if (!s0.queue.length) return done && done(true);
+        if (s0.paused) return done && done(false, s0.paused);
         flushing = true;
         (function next() {
             var s = syncState(), op = s.queue[0];
@@ -914,6 +1459,13 @@
                 saveSync(s);
                 next();
             }, function (err) {
+                if (err === 'challenge' || err === 'noauth') {
+                    s.paused = err;
+                    saveSync(s);
+                    flushing = false;
+                    notifyPaused(err);
+                    return done && done(false, err);
+                }
                 op.tries = (op.tries || 0) + 1;
                 var drop = op.tries >= 5 || (err === 'rejected' && op.tries >= 2);
                 if (drop) s.queue.shift();
@@ -921,7 +1473,7 @@
                 if (drop) return next();
                 flushing = false;
                 done && done(false);
-            });
+            }, op.url);
         })();
     }
 
@@ -932,6 +1484,8 @@
             var login = parseAccountName(html);
             if (!login) return fail('noauth');
             Lampa.Storage.set('doramy_account', { login: login, ts: Date.now() });
+            var ss = syncState();
+            if (ss.paused) { ss.paused = ''; saveSync(ss); }
             ok(login);
         }, function (e) { fail(e || 'error'); });
     }
@@ -983,7 +1537,10 @@
                     else finish(null, info);
                 }
             });
-        }, function (e) { finish(e); });
+        }, function (e) {
+            if (e === 'challenge' || e === 'noauth') { var ps = syncState(); ps.paused = e; saveSync(ps); }
+            finish(e);
+        });
     }
 
     function runSync(silent) {
@@ -998,7 +1555,7 @@
     function checkAccount() {
         if (!cookie()) return Lampa.Noty.show('Сначала вставьте cookie сессии в настройках');
         Lampa.Noty.show('Проверяю вход…');
-        checkSession(function (login) { Lampa.Noty.show('Вход выполнен: ' + login); },
+        checkSession(function (login) { Lampa.Noty.show('Вход выполнен: ' + login + ' (cookie получена ' + cookieAgeText() + ')'); },
             function (e) { Lampa.Noty.show(syncErrorText(e)); });
     }
 
@@ -1100,12 +1657,16 @@
             if (!ep.link) return Lampa.Noty.show('Для этой серии нет видео у выбранной озвучки');
             Lampa.Noty.show('Получаю ссылку на видео…');
             resolveStream(ep.link, function (s) {
+                // ручная метка заставки (на тайтл и озвучку): Lampa показывает кнопку «Пропустить»
+                var sk = getMap('doramy_skip')[t.id + ':' + (t.voice || '')];
+                var seg = sk ? { skip: [{ start: sk.start, end: sk.end }] } : null;
                 var playlist = eps.map(function (e, i) {
                     var o = {
                         title: e.name,
                         timeline: Lampa.Timeline.view(episodeHash(t.id, epKey(e))),
                         callback: function () { remember(t, e, i, eps.length); }
                     };
+                    if (seg) o.segments = seg;
                     if (i === idx) {
                         o.url = s.url;
                         o.quality = s.quality;
@@ -1129,11 +1690,13 @@
                     timeline: Lampa.Timeline.view(episodeHash(t.id, epKey(ep))),
                     playlist: playlist
                 };
+                if (seg) item.segments = seg;
                 if (!applyPlayer(item, mode)) return;
                 remember(t, ep, idx, eps.length);
+                playingNow = true; // во время просмотра фоновые проверки (новые серии, синк) не запускаем
                 Lampa.Player.play(item);
                 Lampa.Player.playlist(playlist);
-                Lampa.Player.callback(function () { onClose && onClose(); });
+                Lampa.Player.callback(function () { playingNow = false; onClose && onClose(); });
             }, function (e) {
                 Lampa.Noty.show('Не удалось получить видео (' + e + '). Проверьте прокси в настройках.');
             });
@@ -1193,6 +1756,7 @@
             '.dc-more{padding:.4em 1.5em 1.5em;text-align:center}.dc-btn--more{display:inline-block}' +
             '.dc-modal__text{padding:1em 1.5em;line-height:1.5;font-size:1.2em;white-space:pre-wrap}' +
             '.dc-empty{padding:3em 1.5em;font-size:1.3em;opacity:.7;line-height:1.4}' +
+            '.dc-actor .dc-title__poster{width:10em}.dc-card__sub{min-height:1.2em}' +
             '@media (max-width:760px){.dc-title{flex-direction:column;padding:1em}.dc-title__poster{width:9em;margin:0 0 1em 0}' +
             '.dc-title__name{font-size:1.5em}.dc-grid{padding:0 .5em}.dc-bar{padding:0 1em 1em}.dc-row__title{padding:0 1em .6em;font-size:1.3em}}' +
             '@media (max-width:1499px){.dc-card{width:14.2857%}}' +
@@ -1282,11 +1846,16 @@
     }
 
     function openTitle(t) {
+        if (t.catalogPath) return openCatalog(t.catalogPath, t.title);
         Lampa.Activity.push({ url: '', title: t.title, component: 'doramyclub_title', item: brief(t), page: 1 });
     }
 
-    function openCatalog(path, title) {
-        Lampa.Activity.push({ url: '', title: title, component: 'doramyclub_main', catalog: { path: path, title: title }, page: 1 });
+    function openCatalog(path, title, query) {
+        Lampa.Activity.push({ url: '', title: title, component: 'doramyclub_main', catalog: { path: path, title: title, query: query || '' }, page: 1 });
+    }
+
+    function openScreen(mode, title) {
+        Lampa.Activity.push({ url: '', title: title, component: 'doramyclub_main', mode: mode, page: 1 });
     }
 
     function openMarks(kind) {
@@ -1309,6 +1878,309 @@
     }
 
     // Каталог как на сайте: разделы, страны, жанры, годы. Второй уровень — отдельным списком.
+
+    /* ------------------------------------------------------------------ */
+    /*  Новые серии, расписание, поиск актёров, навигатор, рандом          */
+    /* ------------------------------------------------------------------ */
+
+    var playingNow = false;
+
+    function knownItem(id) {
+        var m = getMap('doramy_marks')[id];
+        if (m && m.item) return m.item;
+        return getMap('doramy_state')[id] || null;
+    }
+
+    // Что отслеживаем: «Смотрю», избранное и история просмотра
+    function trackedIds() {
+        var ids = {}, marks = getMap('doramy_marks'), st = getMap('doramy_state'), id;
+        for (id in marks) if (marks.hasOwnProperty(id) && (marks[id].fav || marks[id].status === 'watching')) ids[id] = true;
+        for (id in st) if (st.hasOwnProperty(id)) ids[id] = true;
+        return ids;
+    }
+
+    // Открыли страницу тайтла — это «увиденное» состояние счётчиков серий; новости по нему гасятся
+    function markSeen(id, v, s2) {
+        var seen = getMap('doramy_epseen');
+        seen[id] = { v: v || 0, s: s2 || 0, ts: Date.now() };
+        Lampa.Storage.set('doramy_epseen', seen);
+        var news = getMap('doramy_news');
+        if (news[id]) { delete news[id]; Lampa.Storage.set('doramy_news', news); }
+    }
+
+    function newsItems() {
+        var news = getMap('doramy_news');
+        return Object.keys(news).map(function (id) {
+            var t = $.extend({}, news[id].item);
+            t._news = { dv: news[id].dv || 0, ds: news[id].ds || 0 };
+            return t;
+        });
+    }
+
+    function newsBadge(t) {
+        if (!t._news) return '';
+        var p = [];
+        if (t._news.dv) p.push('+' + t._news.dv + ' оз.');
+        if (t._news.ds) p.push('+' + t._news.ds + ' сб.');
+        return p.join(' ');
+    }
+
+    // Читает первые 3 страницы ленты обновлений (не чаще раза в 45 минут) и сравнивает счётчики «Озвучка/Субтитры: N серия»
+    // с тем, что вы уже видели. Результат (изменились ли новости, сколько их) — в done.
+    function checkNews(done, force) {
+        var meta = getMap('doramy_newsmeta');
+        if (!setting('doramy_news_on', true) || playingNow || (!force && Date.now() - (meta.ts || 0) < 45 * 60000)) return done && done(false, 0);
+        var ids = trackedIds();
+        if (!Object.keys(ids).length) return done && done(false, 0);
+        var current = {}, pages = ['/', '/page/2', '/page/3'], i = 0, got = 0;
+        function finish() {
+            if (!got) return done && done(false, 0);
+            var res = detectNews(getMap('doramy_epseen'), current, ids);
+            Lampa.Storage.set('doramy_epseen', res.seen);
+            var old = getMap('doramy_news'), merged = {}, id;
+            for (id in old) if (old.hasOwnProperty(id) && !current[id]) merged[id] = old[id]; // тайтла нет в загруженных страницах — не теряем
+            for (id in res.news) if (res.news.hasOwnProperty(id)) merged[id] = res.news[id];
+            var changed = Object.keys(merged).sort().join(',') !== Object.keys(old).sort().join(',');
+            Lampa.Storage.set('doramy_news', merged);
+            Lampa.Storage.set('doramy_newsmeta', { ts: Date.now() });
+            done && done(changed, Object.keys(merged).length);
+        }
+        (function next() {
+            if (i >= pages.length) return finish();
+            fetchPage(pages[i++], function (html) {
+                got++;
+                parseListing(html, base()).forEach(function (t) {
+                    if (!current[t.id]) current[t.id] = { voiceEp: t.voiceEp, subsEp: t.subsEp, item: brief(t) };
+                });
+                next();
+            }, function () { finish(); });
+        })();
+    }
+
+    // Расписание: сайт публикует только текст «серии выходят по субботам» на странице тайтла со статусом «Выходит»
+    function saveSchedule(t, d) {
+        var sc = getMap('doramy_schedule');
+        if (d.status === 'Выходит' && d.schedule) sc[t.id] = { days: d.schedule.days, text: d.schedule.text, item: brief(t), ts: Date.now() };
+        else sc[t.id] = { ended: true, ts: Date.now() };
+        Lampa.Storage.set('doramy_schedule', sc);
+    }
+
+    // Раз в сутки перечитываем страницы отслеживаемых тайтлов без свежего расписания (не больше 15, по очереди)
+    function refreshSchedule(done) {
+        var meta = getMap('doramy_schedmeta');
+        if (playingNow || Date.now() - (meta.ts || 0) < 24 * 3600000) return done && done();
+        var sc = getMap('doramy_schedule');
+        var queue = Object.keys(trackedIds()).filter(function (id) {
+            return !sc[id] || Date.now() - (sc[id].ts || 0) > 7 * 86400000;
+        }).slice(0, 15);
+        (function next() {
+            var id = queue.shift();
+            if (!id) { Lampa.Storage.set('doramy_schedmeta', { ts: Date.now() }); return done && done(); }
+            var it = knownItem(id);
+            if (!it || !it.url) return next();
+            fetchPage(it.url, function (html) { saveSchedule(it, parseDetail(html, base())); next(); }, function () { next(); });
+        })();
+    }
+
+    function scheduleGroups() {
+        var sc = getMap('doramy_schedule'), today = (new Date().getDay() + 6) % 7, groups = [];
+        for (var k = 0; k < 7; k++) {
+            var day = (today + k) % 7, items = [];
+            Object.keys(sc).forEach(function (id) {
+                var e = sc[id];
+                if (e && !e.ended && e.days && e.days.indexOf(day) >= 0) items.push($.extend({}, e.item));
+            });
+            if (items.length) groups.push({ title: DAY_NAMES[day] + (k === 0 ? ' (сегодня)' : ''), items: items });
+        }
+        return groups;
+    }
+
+    function actorItem(a) {
+        return { id: 'a:' + a.path, title: a.name, poster: a.photo, catalogPath: a.path, country: a.birth || '', year: 0, rating: 0, info: 'Актёр', mini: false, status: '', voiceEp: 0, subsEp: 0 };
+    }
+
+    function podItem(p) {
+        return { id: 'p:' + p.path, title: p.title, poster: p.poster, catalogPath: p.path, country: '', year: 0, rating: 0, info: '', mini: false, status: '', voiceEp: 0, subsEp: 0 };
+    }
+
+    // Быстрый поиск актёров сайта; nonce берём со страницы, при «Обновите страницу» перечитываем один раз
+    var seaNonce = null;
+
+    function searchActors(q, cb, retried) {
+        if (('' + q).length < 3) return cb([]);
+        var withNonce = function (n) {
+            net(absUrl('/wp-admin/admin-ajax.php?security=' + n + '&action=fast_ajax_search_akters&term=' + encodeURIComponent(q), base()), { site: true, referer: base() + '/' }, function (res) {
+                if (looksLikeChallenge(res)) return cb([]);
+                if (ajaxNonceExpired(res)) {
+                    if (retried) return cb([]);
+                    seaNonce = null;
+                    return searchActors(q, cb, true);
+                }
+                cb(parseActorsAjax(res, base()));
+            }, function () { cb([]); });
+        };
+        if (seaNonce && Date.now() - seaNonce.ts < 50 * 60000) return withNonce(seaNonce.v);
+        fetchPage('/', function (html) {
+            var n = parseSeaNonce(html);
+            if (!n) return cb([]);
+            seaNonce = { v: n, ts: Date.now() };
+            withNonce(n);
+        }, function () { cb([]); }, !!retried);
+    }
+
+    function pickOne(title, options, current, cb) {
+        Lampa.Select.show({
+            title: title,
+            items: options.map(function (o) { return { title: o[0], value: o[1], selected: o[1] === current }; }),
+            onSelect: function (it) { cb(it.value); },
+            onBack: function () { cb(current); }
+        });
+    }
+
+    function pickMulti(title, options, selected, cb) {
+        var cur = selected.slice();
+        Lampa.Select.show({
+            title: title,
+            items: options.map(function (o) { return { title: o[0], value: o[1], checkbox: true, checked: cur.indexOf(o[1]) >= 0 }; }),
+            onCheck: function (it) {
+                var i = cur.indexOf(it.value);
+                if (it.checked && i < 0) cur.push(it.value);
+                else if (!it.checked && i >= 0) cur.splice(i, 1);
+            },
+            onBack: function () { cb(cur); }
+        });
+    }
+
+    // Фильтр как на сайте (/navi-cl): раздел, страна, перевод, студия, годы, жанры (И/ИЛИ), исключение жанров, сортировка, «вышедшие», «без мини»
+    function openNavi() {
+        var back = function () { Lampa.Controller.toggle('content'); };
+        var f = $.extend({ years: [], genres: [], exclude: [] }, getMap('doramy_navi'));
+        var save = function () { Lampa.Storage.set('doramy_navi', f); };
+        var yn = function (v) { return v ? 'да' : 'нет'; };
+        var names = function (list, vals) { return vals.length ? optionLabels(list, vals).join(', ') : 'любые'; };
+        function menu() {
+            var items = [
+                { title: 'Раздел: ' + (optionLabel(NAVI.razdel, f.razdel || '') || 'Все разделы'), k: 'razdel', list: NAVI.razdel },
+                { title: 'Страна: ' + (optionLabel(NAVI.strana, f.strana || '') || 'Все страны'), k: 'strana', list: NAVI.strana },
+                { title: 'Перевод: ' + (optionLabel(NAVI.perevod, f.perevod || '') || 'Любой'), k: 'perevod', list: NAVI.perevod },
+                { title: 'Студия озвучки: ' + (optionLabel(NAVI.studiya, f.studiya || '') || 'Все озвучки'), k: 'studiya', list: NAVI.studiya },
+                { title: 'Годы: ' + names(NAVI.years, f.years), k: 'years', multi: NAVI.years },
+                { title: 'Жанры: ' + names(NAVI.genres, f.genres), k: 'genres', multi: NAVI.genres },
+                { title: 'Все выбранные жанры обязательны: ' + yn(f.genresAnd), k: 'genresAnd', toggle: true },
+                { title: 'Исключить жанры: ' + names(NAVI.genres, f.exclude), k: 'exclude', multi: NAVI.genres },
+                { title: 'Сортировать по рейтингу: ' + yn(f.sortRating), k: 'sortRating', toggle: true },
+                { title: 'Только вышедшие: ' + yn(f.released), k: 'released', toggle: true },
+                { title: 'Без мини-дорам: ' + yn(f.noMini), k: 'noMini', toggle: true },
+                { title: 'Показать результаты →', go: true },
+                { title: 'Сбросить фильтр', reset: true }
+            ];
+            Lampa.Select.show({
+                title: 'Фильтр (как на сайте)',
+                items: items,
+                onSelect: function (it) {
+                    if (it.go) { save(); back(); return openCatalog('/navi-cl', naviTitle(f), naviQuery(f)); }
+                    if (it.reset) { f = { years: [], genres: [], exclude: [] }; save(); return setTimeout(menu, 80); }
+                    if (it.toggle) { f[it.k] = !f[it.k]; save(); return setTimeout(menu, 80); }
+                    setTimeout(function () {
+                        if (it.list) pickOne(it.title.split(':')[0], it.list, f[it.k] || '', function (v) { f[it.k] = v; save(); setTimeout(menu, 80); });
+                        else pickMulti(it.title.split(':')[0], it.multi, f[it.k], function (v) { f[it.k] = v; save(); setTimeout(menu, 80); });
+                    }, 80);
+                },
+                onBack: back
+            });
+        }
+        menu();
+    }
+
+    // Случайная дорама (POST rand_posts с фильтрами сайта)
+    var randNonce = null;
+
+    function getRandNonce(ok, fail, force) {
+        if (!force && randNonce && Date.now() - randNonce.ts < 50 * 60000) return ok(randNonce.v);
+        net(absUrl('/rand-cl', base()), { site: true, referer: base() + '/' }, function (html) {
+            if (looksLikeChallenge(html)) return fail('challenge');
+            var n = parseRandNonce(html);
+            if (!n) return fail('nonce');
+            randNonce = { v: n, ts: Date.now() };
+            ok(n);
+        }, function (e) { fail(e || 'error'); });
+    }
+
+    function loadRandom(f, ok, fail, retried) {
+        getRandNonce(function (n) {
+            net(absUrl('/wp-admin/admin-ajax.php', base()), {
+                site: true,
+                referer: base() + '/rand-cl',
+                post: enc({ security: n, action: 'rand_posts', category: f.category || '', taxonomy_slug: f.country || '', tax_perevod: f.perevod || '', tax_god: f.period || '', stat_pop: f.popular ? '1' : '0', mini_d: f.noMini ? '1' : '0' })
+            }, function (res) {
+                if (looksLikeChallenge(res)) return fail('challenge');
+                var r = parseRandom(res, base());
+                if (!r) {
+                    if (!retried) { randNonce = null; return loadRandom(f, ok, fail, true); }
+                    return fail('empty');
+                }
+                ok(r);
+            }, function (e) { fail(e || 'error'); });
+        }, fail, !!retried);
+    }
+
+    function randomFilters(f, again) {
+        var save = function () { Lampa.Storage.set('doramy_rand', f); };
+        var yn = function (v) { return v ? 'да' : 'нет'; };
+        var items = [
+            { title: 'Тип: ' + (optionLabel(RAND.category, f.category || '') || 'Всё'), k: 'category', list: RAND.category },
+            { title: 'Страна: ' + (optionLabel(RAND.country, f.country || '') || 'Любая'), k: 'country', list: RAND.country },
+            { title: 'Перевод: ' + (optionLabel(RAND.perevod, f.perevod || '') || 'Любой'), k: 'perevod', list: RAND.perevod },
+            { title: 'Годы: ' + (optionLabel(RAND.period, f.period || '') || 'Любой'), k: 'period', list: RAND.period },
+            { title: 'Только популярные: ' + yn(f.popular), k: 'popular', toggle: true },
+            { title: 'Без мини-дорам: ' + yn(f.noMini), k: 'noMini', toggle: true },
+            { title: 'Искать с этими фильтрами →', go: true }
+        ];
+        Lampa.Select.show({
+            title: 'Фильтры случайной дорамы',
+            items: items,
+            onSelect: function (it) {
+                if (it.go) { save(); Lampa.Controller.toggle('content'); return again(); }
+                if (it.toggle) { f[it.k] = !f[it.k]; save(); return setTimeout(function () { randomFilters(f, again); }, 80); }
+                setTimeout(function () { pickOne(it.title.split(':')[0], it.list, f[it.k] || '', function (v) { f[it.k] = v; save(); setTimeout(function () { randomFilters(f, again); }, 80); }); }, 80);
+            },
+            onBack: function () { save(); Lampa.Controller.toggle('content'); }
+        });
+    }
+
+    function openRandom() {
+        var f = $.extend({}, getMap('doramy_rand'));
+        var again = function () { openRandom(); };
+        var back = function () { Lampa.Controller.toggle('content'); };
+        Lampa.Noty.show('Ищу случайную дораму…');
+        loadRandom(f, function (r) {
+            var t = r.item;
+            Lampa.Select.show({
+                title: t.title + (t.year ? ' (' + t.year + ')' : ''),
+                items: [
+                    { title: 'Открыть', subtitle: [t.country, t.genres, t.info, t.rating ? 'рейтинг ' + t.rating.toFixed(1) : ''].filter(function (x) { return x; }).join(' · '), act: 'open' },
+                    { title: 'Ещё одну', act: 'again' },
+                    { title: 'Описание и актёры', act: 'info' },
+                    { title: 'Фильтры', act: 'filters' }
+                ],
+                onSelect: function (it) {
+                    back();
+                    if (it.act === 'open') return openTitle(t);
+                    if (it.act === 'again') return setTimeout(again, 80);
+                    if (it.act === 'filters') return setTimeout(function () { randomFilters(f, again); }, 80);
+                    var lines = [];
+                    if (r.kind) lines.push(r.kind);
+                    if (r.descr) lines.push(r.descr);
+                    if (r.roles.length) lines.push('Главные роли: ' + r.roles.map(function (x) { return x.name; }).join(', '));
+                    if (r.collections.length) lines.push('В подборках: ' + r.collections.join('; '));
+                    var box = $('<div class="dc-modal"></div>').append($('<div class="dc-modal__text"></div>').text(lines.join('\n\n')));
+                    Lampa.Modal.open({ title: t.title, html: box, size: 'medium', onBack: function () { Lampa.Modal.close(); back(); } });
+                },
+                onBack: back
+            });
+        }, function (e) { Lampa.Noty.show(errorText(e)); });
+    }
+
     function openCatalogMenu() {
         var back = function () { Lampa.Controller.toggle('content'); };
         loadMenu(function (menu) {
@@ -1322,14 +2194,27 @@
                     });
                 }, 80);
             };
-            var items = menu.sections.map(function (s) { return { title: s[0], path: s[1] }; });
-            items.push({ title: 'Страны ▸', group: 'countries' }, { title: 'Жанры ▸', group: 'genres' }, { title: 'Годы ▸', group: 'years' });
+            var items = [
+                { title: 'Фильтр (как на сайте)', special: 'navi' }, { title: 'Случайная дорама', special: 'rand' }, { title: 'Подборки', special: 'pod' },
+                { title: 'Новые серии' + (Object.keys(getMap('doramy_news')).length ? ' (' + Object.keys(getMap('doramy_news')).length + ')' : ''), special: 'news' },
+                { title: 'Расписание', special: 'sched' }, { title: 'Популярные актёры', special: 'actors' }
+            ].concat(menu.sections.map(function (s) { return { title: s[0], path: s[1] }; }));
+            items.push({ title: 'Страны ▸', group: 'countries' }, { title: 'Жанры ▸', group: 'genres' }, { title: 'Годы ▸', group: 'years' }, { title: 'Каналы ▸', group: 'channels' });
             Lampa.Select.show({
                 title: 'Каталог',
                 items: items,
                 onSelect: function (it) {
+                    if (it.special) {
+                        back();
+                        if (it.special === 'navi') return setTimeout(openNavi, 80);
+                        if (it.special === 'rand') return openRandom();
+                        if (it.special === 'pod') return openScreen('podborki', 'Подборки');
+                        if (it.special === 'news') return openScreen('news', 'Новые серии');
+                        if (it.special === 'sched') return openScreen('schedule', 'Расписание');
+                        return openScreen('actorsTop', 'Популярные актёры');
+                    }
                     if (it.path) { back(); return openCatalog(it.path, it.title); }
-                    sub({ countries: 'Страна', genres: 'Жанр', years: 'Год' }[it.group], menu[it.group]);
+                    sub({ countries: 'Страна', genres: 'Жанр', years: 'Год', channels: 'Канал' }[it.group], menu[it.group]);
                 },
                 onBack: back
             });
@@ -1356,14 +2241,14 @@
     /*  Component: главная / каталог / поиск / списки                     */
     /* ------------------------------------------------------------------ */
 
-    var DASH = [['Новинки', '/1-novinki'], ['Топ', '/top'], ['Сериалы', '/serialy'], ['Фильмы', '/filmy']];
+    var DASH = [['Популярное сейчас', '/', 'popular'], ['Новинки', '/1-novinki'], ['Топ', '/top'], ['Сериалы', '/serialy'], ['Фильмы', '/filmy']];
 
     function MainComponent(object) {
         var self = this;
         var scroll = new Lampa.Scroll({ mask: true, over: true, step: 250 });
         var html = $('<div class="dc"></div>');
         var grid = new Grid('content', scroll);
-        var sections = [], btns = [], bar;
+        var sections = [], btns = [], bar, actor = null;
         var destroyed = false, token = 0, builtSig = '', lastData = null;
         var page = 1, more = false, busy = false, moreBtn = null, lastBox = null, lastItems = null;
         var lazy = new Lazy({ margin: 2, trickle: 4 });
@@ -1375,10 +2260,10 @@
             var el = $('<div class="dc-card selector"><div class="dc-card__img"><img alt=""/></div>' +
                 '<div class="dc-card__title"></div><div class="dc-card__sub"></div></div>');
             el.find('.dc-card__title').text(t.title);
-            el.find('.dc-card__sub').text([t.year || '', t.country || ''].filter(function (x) { return x; }).join(' · '));
+            el.find('.dc-card__sub').text([t.mainRole ? 'Главная роль' : '', t.year || '', t.country || ''].filter(function (x) { return x; }).join(' · '));
             lazy.add(el.find('img'), t.poster);
             var img = el.find('.dc-card__img');
-            var b = badge || (t.mini ? 'Мини' : '') || t.info;
+            var b = badge || cardBadge(t);
             if (b) img.append($('<div class="dc-card__badge"></div>').text(b));
             if (t.rating) img.append($('<div class="dc-card__rate"></div>').text(t.rating.toFixed(1)));
             if (pct > 0 && pct < 90) img.append($('<div class="dc-card__bar"><div></div></div>').find('div').css('width', pct + '%').end());
@@ -1456,7 +2341,7 @@
         function toolbar() {
             bar = $('<div class="dc-bar"></div>');
             btns = [];
-            if (object.catalog || object.query || object.marks) {
+            if (object.catalog || object.query || object.marks || object.mode) {
                 btns.push(button('← Главная', function () {
                     Lampa.Activity.replace({ url: '', title: 'Doramy.club', component: 'doramyclub_main', page: 1 }, true);
                 }));
@@ -1464,6 +2349,23 @@
             btns.push(button('Поиск', function () { askSearch('content'); }));
             btns.push(button('Каталог', openCatalogMenu));
             btns.push(button('Мои списки', openMarksMenu));
+            btns.push(button('Случайная', openRandom));
+            var cp = object.catalog ? countryParam(object.catalog.path) : '';
+            if (cp) {
+                var cv = queryValue(object.catalog.query, cp);
+                btns.push(button('Страна: ' + (optionLabel(COUNTRY_FILTER, cv) || 'Все страны'), function () {
+                    pickOne('Страна', COUNTRY_FILTER, cv, function (v) {
+                        Lampa.Controller.toggle('content');
+                        Lampa.Activity.replace({ url: '', title: object.catalog.title, component: 'doramyclub_main', catalog: { path: object.catalog.path, title: object.catalog.title, query: setQueryValue(object.catalog.query, cp, v) }, page: 1 }, true);
+                    });
+                }));
+            }
+            if (actor) {
+                var onlyMain = queryValue(object.catalog.query, 'akter_role') === 'main';
+                btns.push(button(onlyMain ? 'Роли: только главные' : 'Роли: все', function () {
+                    Lampa.Activity.replace({ url: '', title: object.catalog.title, component: 'doramyclub_main', catalog: { path: object.catalog.path, title: object.catalog.title, query: setQueryValue(object.catalog.query, 'akter_role', onlyMain ? '' : 'main') }, page: 1 }, true);
+                }));
+            }
             if (!object.query && !object.marks) btns.push(button('Обновить', function () { self.reload(true); }));
             var pl = button('Плеер: ' + PLAYERS[setting('doramy_player', 'lampa')], function () {
                 choosePlayer(function (v) {
@@ -1510,9 +2412,12 @@
             scroll.clear();
             sections = [];
             toolbar();
+            if (actor) actorHeader();
 
-            var dashboard = !object.query && !object.catalog && !object.marks;
+            var dashboard = !object.query && !object.catalog && !object.marks && !object.mode;
             if (dashboard) {
+                var nws = newsItems();
+                if (nws.length && setting('doramy_row_news', true)) row('Вышли новые серии', nws, newsBadge, {});
                 var hist = history();
                 if (hist.length) {
                     row('Продолжить просмотр', hist, function (h) {
@@ -1525,8 +2430,12 @@
                 }
             }
             if (!data.length || !data.some(function (s) { return s.items.length; })) {
-                scroll.append($('<div class="dc-empty">Ничего не найдено</div>'));
+                scroll.append($('<div class="dc-empty"></div>').text(
+                    object.mode === 'news' ? 'Новых серий пока нет. Отслеживаются дорамы из «Смотрю», избранного и истории — сравниваются счётчики серий на сайте с теми, что вы видели.' :
+                    object.mode === 'schedule' ? 'Расписание пусто: оно строится по дорамам из ваших списков со статусом «Выходит» и текстом сайта «серии выходят по…». Добавьте такие дорамы в «Смотрю» или избранное.' :
+                    'Ничего не найдено'));
             }
+            if (object.mode === 'schedule' && data.length) scroll.append($('<div class="dc-empty"></div>').text('Дни — по данным сайта (когда серии выходят в Корее/Китае); озвучка и субтитры появляются позже.'));
             data.forEach(function (s) {
                 if (!s.items.length) return;
                 row(s.title, s.items, null, null, s.path ? function () { openCatalog(s.path, s.title); } : null);
@@ -1545,7 +2454,18 @@
 
         function pageLoader(p, ok, fail) {
             if (object.query) loadSearch(object.query, p, ok, fail);
-            else loadList(object.catalog.path, p, ok, fail, p === 1 && false);
+            else loadList(object.catalog.path, p, ok, fail, false, object.catalog.query);
+        }
+
+        function actorHeader() {
+            var box = $('<div class="dc-title dc-actor"><div class="dc-title__poster"><img alt=""/></div><div class="dc-title__body"></div></div>');
+            setImage(box.find('img'), actor.photo);
+            var body = box.find('.dc-title__body');
+            body.append($('<div class="dc-title__name"></div>').text(actor.name));
+            var facts = $('<div class="dc-title__facts"></div>');
+            actor.facts.forEach(function (f) { facts.append($('<div></div>').text(f[0] + ': ' + f[1])); });
+            body.append(facts);
+            scroll.append(box);
         }
 
         function loadMore() {
@@ -1586,33 +2506,64 @@
             moreBtn = null;
             busy = false;
             page = 1;
+            actor = null;
             self.activity.loader(true);
             if (object.marks) {
                 build([{ title: LISTS[object.marks], items: markedItems(object.marks) }]);
-            } else if (object.query || object.catalog) {
+            } else if (object.mode === 'podborki') {
+                fetchPage('/podborki-luchshix-doram', function (html) {
+                    if (alive()) build([{ title: 'Подборки', items: parsePodborki(html, base()).map(podItem) }]);
+                }, function (e) { if (alive()) fail(e); }, force);
+            } else if (object.mode === 'actorsTop') {
+                fetchPage('/aktery-top', function (html) {
+                    if (alive()) build([{ title: 'Популярные актёры', items: parseActorsTop(html, base()).map(actorItem) }]);
+                }, function (e) { if (alive()) fail(e); }, force);
+            } else if (object.mode === 'news') {
+                checkNews(function () { if (alive()) build([{ title: 'Вышли новые серии', items: newsItems() }]); }, true);
+            } else if (object.mode === 'schedule') {
+                refreshSchedule(function () { if (alive()) build(scheduleGroups()); });
+            } else if (object.query) {
                 pageLoader(1, function (items, hasMore) {
                     if (!alive()) return;
                     more = hasMore;
-                    var title = object.query ? 'Найдено по запросу «' + object.query + '»' : object.catalog.title;
-                    build([{ title: title, items: items }]);
+                    searchActors(object.query, function (actors) {
+                        if (!alive()) return;
+                        var data = [];
+                        if (actors.length) data.push({ title: 'Актёры', items: actors.slice(0, 12).map(actorItem) });
+                        data.push({ title: 'Найдено по запросу «' + object.query + '»', items: items });
+                        build(data);
+                    });
+                }, function (e) { if (alive()) fail(e); });
+            } else if (object.catalog) {
+                pageLoader(1, function (items, hasMore, pageHtml) {
+                    if (!alive()) return;
+                    more = hasMore;
+                    if (/^\/akter\//.test(object.catalog.path)) actor = parseActor(pageHtml, base());
+                    build([{ title: object.catalog.title, items: items }]);
                 }, function (e) { if (alive()) fail(e); });
             } else {
                 var left = DASH.length, res = [], errs = 0, lastErr = '';
+                var done = function () {
+                    if (errs === DASH.length) return fail(lastErr);
+                    build(res);
+                    // фоновые проверки: новые серии и расписание (раз в сутки), только если пользователь ничего не смотрит
+                    checkNews(function (changed) { if (changed && alive()) build(res); });
+                    refreshSchedule();
+                };
                 DASH.forEach(function (d, i) {
-                    loadList(d[1], 1, function (items) {
-                        res[i] = { title: d[0], items: items, path: d[1] };
+                    var ok = function (items) {
+                        res[i] = { title: d[0], items: items, path: d[2] ? undefined : d[1] };
                         if (!--left && alive()) done();
-                    }, function (e) {
+                    };
+                    var bad = function (e) {
                         errs++;
                         lastErr = e;
                         res[i] = { title: d[0], items: [] };
                         if (!--left && alive()) done();
-                    }, force);
+                    };
+                    if (d[2] === 'popular') fetchPage(d[1], function (html) { ok(parsePopular(html, base()).slice(0, 10)); }, bad, force);
+                    else loadList(d[1], 1, ok, bad, force);
                 });
-                var done = function () {
-                    if (errs === DASH.length) fail(lastErr);
-                    else build(res);
-                };
             }
         };
 
@@ -1638,7 +2589,7 @@
     /*  Component: страница тайтла                                        */
     /* ------------------------------------------------------------------ */
 
-    var ROW_BTNS = 0, ROW_EPS = 1, ROW_SIM = 2;
+    var ROW_BTNS = 0, ROW_EPS = 1, ROW_CAST = 2, ROW_SIM = 3;
 
     function TitleComponent(object) {
         var self = this;
@@ -1647,8 +2598,8 @@
         var grid = new Grid('content', scroll);
         var item = object.item, d = null;
         var tracks = [], others = [], othersState = 'idle', cur = 0, eps = [], epNodes = [];
-        var rows = [[], [], []];
-        var continueBtn, voiceBtn, head, epsHost, simHost, btnsBox;
+        var rows = [[], [], [], []];
+        var continueBtn, voiceBtn, head, epsHost, castHost, simHost, btnsBox;
         var destroyed = false, token = 0, tlTimer = null;
         var epLazy = new Lazy({ margin: 1 });
 
@@ -1683,7 +2634,7 @@
         }
 
         function play(idx) {
-            var t = $.extend({}, item, { title: d.title || item.title, poster: d.poster || item.poster, year: d.year || item.year, country: d.country || item.country, total: d.total });
+            var t = $.extend({}, item, { title: d.title || item.title, poster: d.poster || item.poster, year: d.year || item.year, country: d.country || item.country, total: d.total, voice: tracks[cur] ? tracks[cur].title : '' });
             playEpisode(t, eps, idx, function () {
                 refreshProgress();
                 grid.at(ROW_EPS, idx);
@@ -1696,6 +2647,22 @@
             Lampa.Timeline.update({ hash: v.hash, percent: watched ? 100 : 0, time: watched ? dur : 0, duration: watched ? dur : 0 });
         }
 
+        // Метка заставки: одна на тайтл и озвучку, применяется ко всем сериям (Lampa покажет «Пропустить»)
+        function skipKey() { return item.id + ':' + (tracks[cur] ? tracks[cur].title : ''); }
+
+        function setSkip() {
+            var sk = getMap('doramy_skip')[skipKey()];
+            Lampa.Input.edit({ title: 'Заставка: начало-конец, например 1:30-2:45', value: sk ? fmtTime(sk.start) + '-' + fmtTime(sk.end) : '', free: true, nosave: true }, function (txt) {
+                Lampa.Controller.toggle('content');
+                var r = parseSkip(txt);
+                if (!r) return Lampa.Noty.show('Формат: мм:сс-мм:сс, конец позже начала');
+                var m = getMap('doramy_skip');
+                m[skipKey()] = r;
+                Lampa.Storage.set('doramy_skip', m);
+                Lampa.Noty.show('Заставка сохранена: ' + fmtTime(r.start) + '–' + fmtTime(r.end));
+            });
+        }
+
         function episodeMenu(i) {
             var ep = eps[i], v = viewOf(ep), watched = v.percent >= 90;
             var items = [
@@ -1704,6 +2671,9 @@
             ];
             if (v.percent > 0 || v.time > 5) items.push({ title: 'Сбросить прогресс серии', run: function () { setWatched(i, false); } });
             items.push({ title: 'Сбросить прогресс всего тайтла', run: function () { for (var k = 0; k < eps.length; k++) setWatched(k, false); } });
+            var sk = getMap('doramy_skip')[skipKey()];
+            items.push({ title: sk ? 'Заставка: ' + fmtTime(sk.start) + '–' + fmtTime(sk.end) + ' (изменить)' : 'Задать пропуск заставки…', run: setSkip });
+            if (sk) items.push({ title: 'Убрать пропуск заставки', run: function () { var m = getMap('doramy_skip'); delete m[skipKey()]; Lampa.Storage.set('doramy_skip', m); } });
             Lampa.Select.show({
                 title: ep.name,
                 items: items,
@@ -1771,15 +2741,32 @@
             refreshProgress();
         }
 
+        // «Автоперевод»: на сайте одна ссылка «выбор серий в плеере» — раскрываем её в список серий Kodik
+        function ensureTrack(i, cb) {
+            var tr = tracks[i];
+            if (!tr || !tr.auto || tr.resolved || !tr.links[0]) return cb();
+            voiceBtn.text('Озвучка: загрузка…');
+            net(tr.links[0], { referer: base() + '/' }, function (html) {
+                var k = parseKodikPage(html), links = [];
+                k.series.forEach(function (x) { links[x.num - 1] = x.link; });
+                for (var j = 0; j < links.length; j++) if (!links[j]) links[j] = '';
+                if (links.length) tr.links = links;
+                tr.resolved = true;
+                if (!destroyed) cb();
+            }, function () { tr.resolved = true; if (!destroyed) cb(); });
+        }
+
         function selectTrack(i) {
-            cur = i;
-            buildEps();
-            renderEpisodes();
-            voiceBtn.text('Озвучка: ' + tracks[cur].title);
-            grid.set(rows, true);
-            var m = getMap('doramy_voice');
-            m[item.id] = tracks[i].title;
-            Lampa.Storage.set('doramy_voice', m);
+            ensureTrack(i, function () {
+                cur = i;
+                buildEps();
+                renderEpisodes();
+                voiceBtn.text('Озвучка: ' + tracks[cur].title);
+                grid.set(rows, true);
+                var m = getMap('doramy_voice');
+                m[item.id] = tracks[i].title;
+                Lampa.Storage.set('doramy_voice', m);
+            });
         }
 
         function initialTrack() {
@@ -1978,7 +2965,7 @@
             var back = button(wb, 'Назад', function () { Lampa.Activity.backward(); });
             body.append(wb);
             scroll.append(head);
-            rows = [[again, back], [], []];
+            rows = [[again, back], [], [], []];
             grid.set(rows);
             grid.at(0, 0);
             self.activity.loader(false);
@@ -2006,14 +2993,17 @@
             tracks = (d.tracks || []).slice();
             scroll.clear();
             epLazy.reset();
+            markSeen(item.id, d.voiceEp, d.subsEp);
+            saveSchedule(item, d);
 
             head = $('<div class="dc-title"><div class="dc-title__poster"><img alt=""/></div><div class="dc-title__body"></div></div>');
-            setImage(head.find('.dc-title__poster img'), d.poster || item.poster);
+            var posterImg = head.find('.dc-title__poster img');
+            setImage(posterImg, d.posterHd || d.poster || item.poster, function () { setImage(posterImg, d.poster || item.poster); });
             var body = head.find('.dc-title__body');
             body.append($('<div class="dc-title__name"></div>').text(d.title || item.title));
             if (item.orig) body.append($('<div class="dc-title__orig"></div>').text(item.orig));
             var meta = $('<div class="dc-title__meta"></div>');
-            if (d.rating) meta.append($('<span class="dc-title__rate"></span>').text(d.rating.toFixed(1)));
+            if (d.rating) meta.append($('<span class="dc-title__rate"></span>').text(d.rating.toFixed(1) + (d.ratingCount ? ' · ' + d.ratingCount + ' оц.' : '')));
             meta.append(document.createTextNode([d.year || '', d.country || '', (d.genres || []).join(', ')].filter(function (x) { return x; }).join(' · ')));
             body.append(meta);
             if (d.note) body.append($('<div class="dc-title__note"></div>').text(d.note));
@@ -2032,27 +3022,32 @@
             var descrBtn = d.description ? button(btnsBox, 'Описание', showDescription) : null;
             var ppl = (d.links.length || d.cast.length) ? button(btnsBox, 'Актёры и студия', peopleMenu) : null;
             var gen = (d.genres.length || d.country) ? button(btnsBox, 'Жанры', genresMenu) : null;
-            var lampaBtn = (Lampa.Search && Lampa.Search.open) ? button(btnsBox, 'Карточка Lampa', function () {
-                Lampa.Search.open({ input: d.title || item.title });
-            }) : null;
+            var collBtn = d.collections && d.collections.length ? button(btnsBox, 'Подборки', collectionsMenu) : null;
+            var commBtn = d.comments && d.comments.length ? button(btnsBox, 'Отзывы (' + d.comments.length + ')', showComments) : null;
+            var lampaBtn = (Lampa.Search && Lampa.Search.open) ? button(btnsBox, 'Карточка Lampa', openTmdb) : null;
             body.append(btnsBox);
             scroll.append(head);
 
             epsHost = $('<div class="dc-eps-host"></div>');
             scroll.append(epsHost);
+            castHost = $('<div class="dc-cast-host"></div>');
+            scroll.append(castHost);
             simHost = $('<div class="dc-sim-host"></div>');
             scroll.append(simHost);
 
             var btnRow = [continueBtn, voiceBtn, qBtn, plBtn, listBtn];
-            [descrBtn, ppl, gen, lampaBtn].forEach(function (b) { if (b) btnRow.push(b); });
-            rows = [btnRow, [], []];
+            [descrBtn, ppl, gen, collBtn, commBtn, lampaBtn].forEach(function (b) { if (b) btnRow.push(b); });
+            rows = [btnRow, [], [], []];
 
             // Основная озвучка и субтитры — вкладки сайта; остальные озвучки грузим из Kodik в фоне
             if (tracks.length) {
                 cur = initialTrack();
-                buildEps();
-                renderEpisodes();
-                voiceBtn.text('Озвучка: ' + tracks[cur].title);
+                ensureTrack(cur, function () {
+                    buildEps();
+                    renderEpisodes();
+                    voiceBtn.text('Озвучка: ' + tracks[cur].title);
+                    grid.set(rows, true);
+                });
                 fetchOthers();
             } else if (d.iframe) {
                 // на сайте нет вкладок (только iframe Kodik) — выбираем из списка Kodik по предпочтению
@@ -2075,6 +3070,7 @@
                 voiceBtn.text('Озвучка: нет видео');
             }
 
+            if (d.cast && d.cast.length) renderCast();
             if (d.similar && d.similar.length) renderSimilar();
 
             // хотя бы один выбираемый элемент всегда есть — кнопки
@@ -2083,6 +3079,71 @@
             self.activity.loader(false);
             self.activity.toggle();
             setTimeout(function () { epLazy.check(); }, 100);
+        }
+
+        function renderCast() {
+            var wrap = $('<div class="dc-row dc-row--sim"><div class="dc-row__title">В ролях</div></div>');
+            var line = new Lampa.Scroll({ horizontal: true, step: 450 });
+            var nodes = [];
+            d.cast.slice(0, 30).forEach(function (c) {
+                var el = $('<div class="dc-sim selector"><div class="dc-card__img"><img alt=""/></div><div class="dc-card__title"></div><div class="dc-card__sub"></div></div>');
+                el.find('.dc-card__title').text(c.name);
+                el.find('.dc-card__sub').text(c.role);
+                epLazy.add(el.find('img'), c.photo);
+                el.on('hover:focus', function () { grid.track(el); line.update(el, true); scroll.update(wrap, false); setTimeout(function () { epLazy.check(); }, 60); });
+                el.on('hover:hover hover:touch', function () { grid.track(el); });
+                el.on('hover:enter', function () { openCatalog(c.path, c.name); });
+                nodes.push(el);
+                line.append(el);
+            });
+            wrap.append(line.render());
+            castHost.append(wrap);
+            rows[ROW_CAST] = nodes;
+        }
+
+        function collectionsMenu() {
+            Lampa.Select.show({
+                title: 'Подборки',
+                items: d.collections.map(function (c) { return { title: c.title, path: c.path }; }),
+                onSelect: function (it) { Lampa.Controller.toggle('content'); openCatalog(it.path, it.title); },
+                onBack: function () { Lampa.Controller.toggle('content'); }
+            });
+        }
+
+        // Отзывы: только чтение, инлайн-часть со страницы тайтла
+        function showComments() {
+            var lines = ['Осторожно, могут быть спойлеры.' + (d.commentsClosed ? ' Новые отзывы к этой дораме закрыты.' : '')];
+            d.comments.forEach(function (c) { lines.push(c.author + ' · ' + c.date + '\n' + c.text); });
+            var box = $('<div class="dc-modal"></div>').append($('<div class="dc-modal__text"></div>').text(lines.join('\n\n')));
+            Lampa.Modal.open({ title: 'Отзывы: ' + d.title, html: box, size: 'medium', onBack: function () { Lampa.Modal.close(); Lampa.Controller.toggle('content'); } });
+        }
+
+        // Точный матч в TMDB (оригинальное название + год + тип) → полная карточка Lampa; запасной путь — поиск Lampa
+        function openTmdb() {
+            var cache = getMap('doramy_tmdb'), q = item.orig || d.title || item.title, type = d.kind === 'movie' ? 'movie' : 'tv';
+            var open = function (card) {
+                Lampa.Activity.push({ url: '', title: card.title || card.name || q, component: 'full', id: card.id, method: type, card: card, source: 'tmdb' });
+            };
+            var fallback = function () {
+                if (Lampa.Search && Lampa.Search.open) Lampa.Search.open({ input: q });
+                else Lampa.Noty.show('Поиск Lampa недоступен');
+            };
+            if (cache[item.id]) return open(cache[item.id]);
+            try {
+                var url = Lampa.TMDB.api('search/' + type + '?api_key=' + Lampa.TMDB.key() + '&language=ru&query=' + encodeURIComponent(q) +
+                    (d.year ? (type === 'tv' ? '&first_air_date_year=' : '&year=') + d.year : ''));
+                new Lampa.Reguest().silent(url, function (json) {
+                    var res = (json && json.results) || [], best = null;
+                    for (var i = 0; i < res.length && !best; i++) {
+                        if (d.year && ((res[i].first_air_date || res[i].release_date || '') + '').slice(0, 4) === '' + d.year) best = res[i];
+                    }
+                    best = best || res[0];
+                    if (!best) return fallback();
+                    cache[item.id] = { id: best.id, title: best.title, name: best.name, original_title: best.original_title, original_name: best.original_name, first_air_date: best.first_air_date, release_date: best.release_date, poster_path: best.poster_path, overview: best.overview, vote_average: best.vote_average };
+                    Lampa.Storage.set('doramy_tmdb', cache);
+                    open(cache[item.id]);
+                }, fallback);
+            } catch (e) { fallback(); }
         }
 
         function renderSimilar() {
@@ -2166,14 +3227,28 @@
     }
 
     function showDiagnostics(state) {
+        var a = analyzeCookie(cookie(), siteUA());
         var lines = [
             'Версия плагина: ' + VERSION,
             'Сайт: ' + base() + ' → ' + state.site,
+            'Селекторы: ' + state.parse,
             'Прокси: ' + (setting('doramy_proxy', '') || 'не задан'),
+            'Зеркала: ' + (mirrors().length ? mirrors().join(', ') : 'не заданы'),
             'Kodik: ' + KODIK + ' → ' + state.kodik,
-            'User-Agent: ' + ((typeof navigator !== 'undefined' && navigator.userAgent) || '').slice(0, 140)
+            'Cookie: ' + (cookie() ? 'задана (' + a.names.length + ' шт.), получена ' + cookieAgeText() : 'не задана'),
+            '  сессия аккаунта: ' + (a.hasSession ? 'есть' : 'нет') + ', cookie проверки браузера: ' + (a.hasAntibot ? 'есть' : 'нет'),
+            '  UA в cookie ' + (a.uaMatch === null ? 'не указан' : a.uaMatch ? 'совпадает с UA плагина' : 'НЕ совпадает с UA плагина')
         ];
-        if (state.site.indexOf('anti-bot') >= 0) lines.push('Сайт требует проверку браузера: без прокси, который её проходит, каталог не загрузится.');
+        if (cookie()) lines.push('  состав: ' + maskCookie(cookie()));
+        var sy = syncState();
+        lines.push('Синхронизация: очередь ' + sy.queue.length + (sy.paused ? ', ПАУЗА (' + (sy.paused === 'noauth' ? 'сессия истекла' : 'проверка браузера') + ')' : '') + (sy.last ? ', последняя ' + new Date(sy.last).toLocaleString() : ''));
+        lines.push('Платформа: ' + platformName() + ', User-Agent: ' + ((typeof navigator !== 'undefined' && navigator.userAgent) || '').slice(0, 100));
+        if (state.site.indexOf('anti-bot') >= 0) {
+            lines.push('');
+            lines.push('Сайт требует проверку браузера, и плагин её не решает. Что делать: вставьте cookie вашего браузера (кнопка «Вставить cookie»), при несовпадении UA включите «User-Agent из cookie», либо используйте прокси/шлюз, который проходит проверку.');
+            if (a.hasAntibot && a.uaMatch === false) lines.push('Cookie проверки есть, но UA в ней другой: сайт, скорее всего, привязал проверку к браузеру, из которого она взята.');
+            if (cookie() && !a.hasAntibot) lines.push('В cookie нет cookie проверки браузера (__js_p_, __jhash_, __jua_): скопируйте строку Cookie целиком.');
+        }
         var box = $('<div class="dc-modal"></div>').append($('<div class="dc-modal__text"></div>').text(lines.join('\n')));
         Lampa.Modal.open({
             title: 'Doramy.club: диагностика',
@@ -2183,16 +3258,27 @@
         });
     }
 
+    // Диагностика + «контрактная» проверка селекторов на живых страницах: список, страница тайтла (плеер, жанры), навигатор
     function runDiagnostics() {
         Lampa.Noty.show('Проверяю сайт и плеер…');
-        var state = { site: '…', kodik: '…' }, left = 2;
+        var state = { site: '…', kodik: '…', parse: '…' }, left = 2;
         var done = function () { if (!--left) showDiagnostics(state); };
         var t0 = Date.now();
-        fetchPage('/serialy', function (html) {
-            state.site = 'доступен, ' + parseListing(html, base()).length + ' карточек (' + (Date.now() - t0) + ' мс)';
-            done();
+        fetchPage('/serialy', function (html, offline) {
+            var items = parseListing(html, base());
+            state.site = (offline ? 'офлайн-кеш, ' : 'доступен, ') + items.length + ' карточек (' + (Date.now() - t0) + ' мс)';
+            if (!items.length) { state.parse = 'НЕТ карточек: разметка сайта могла измениться'; return done(); }
+            fetchPage(items[0].url, function (page) {
+                var d = parseDetail(page, base());
+                var tr = 0;
+                d.tracks.forEach(function (x) { tr += x.links.length ? 1 : 0; });
+                state.parse = 'карточек ' + items.length + '; тайтл «' + (d.title || '?') + '»: вариантов плеера ' + tr + ', Kodik-iframe ' + (d.iframe ? 'да' : 'нет') + ', жанров ' + d.genres.length + ', актёров ' + d.cast.length +
+                    (d.title && (tr || d.iframe) ? '' : ' — ПРОВЕРЬТЕ: плеер не найден');
+                done();
+            }, function () { state.parse = 'карточки читаются (' + items.length + '), страница тайтла недоступна'; done(); });
         }, function (e) {
             state.site = e === 'challenge' ? 'НЕДОСТУПЕН (anti-bot: проверка браузера)' : 'НЕДОСТУПЕН (' + e + ')';
+            state.parse = 'не проверено';
             done();
         }, true);
         net(KODIK + '/', {}, function () { state.kodik = 'доступен'; done(); }, function (e) { state.kodik = 'НЕДОСТУПЕН (' + e + ')'; done(); });
@@ -2231,8 +3317,37 @@
         Lampa.SettingsApi.addParam({
             component: 'doramyclub',
             param: { name: 'doramy_cookie', type: 'input', values: '', default: '' },
-            field: { name: 'Cookie сессии', description: 'Войдите на doramy.club в браузере и скопируйте заголовок Cookie запроса. Пароль не нужен и не хранится. Cookie уходит только на адрес сайта из настроек' },
-            onChange: function () { nonceMem = null; }
+            field: { name: 'Cookie сессии', description: 'Длинную строку не набирайте, а вставьте кнопкой ниже (на Mac) или перенесите с Mac через аккаунт Lampa — переключатель ниже. Пароль не нужен и не хранится. Cookie уходит только на адрес сайта из настроек' },
+            onChange: function () {
+                var c = normalizeCookie(setting('doramy_cookie', ''));
+                if (c !== setting('doramy_cookie', '')) Lampa.Storage.set('doramy_cookie', c);
+                Lampa.Storage.set('doramy_cookie_ts', Date.now());
+                nonceMem = null;
+                pushCred();
+            }
+        });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_cookie_paste', type: 'button' },
+            field: { name: 'Вставить cookie из буфера обмена', description: 'Скопируйте строку Cookie в браузере (DevTools → Network → заголовок Cookie запроса) и нажмите здесь' },
+            onChange: pasteCookie
+        });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_cub_cookie', type: 'trigger', default: false },
+            field: { name: 'Перенос cookie между устройствами', description: 'Вставьте cookie на Mac, включите здесь и на приставке — она подтянется через аккаунт Lampa (CUB). Внимание: сессия сайта будет храниться на серверах CUB в вашем аккаунте' },
+            onChange: onCubToggle
+        });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_cub_lists', type: 'trigger', default: false },
+            field: { name: 'Перенос истории и списков между устройствами', description: 'История просмотра и личные списки через аккаунт Lampa (CUB)' },
+            onChange: onCubToggle
+        });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_use_cookie_ua', type: 'trigger', default: false },
+            field: { name: 'User-Agent из cookie', description: 'Сайт привязывает проверку браузера к User-Agent. Включайте, только если cookie взяты вами из своего браузера: плагин будет представляться тем же браузером. Условия сайта на автоматизированные клиенты остаются на вашей ответственности' }
         });
         Lampa.SettingsApi.addParam({
             component: 'doramyclub',
@@ -2262,7 +3377,25 @@
             field: { name: 'Отключить аккаунт', description: 'Забыть cookie и очередь отправки; локальные списки остаются' },
             onChange: logoutAccount
         });
+        Lampa.SettingsApi.addParam({ component: 'doramyclub', param: { name: 'doramy_news_title', type: 'title' }, field: { name: 'Новые серии и ряды на главной' } });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_news_on', type: 'trigger', default: true },
+            field: { name: 'Проверять новые серии', description: 'Раз в 45 минут при открытии дашборда читаются 3 страницы ленты сайта; сравниваются счётчики серий у дорам из «Смотрю», избранного и истории. Во время просмотра не запускается' }
+        });
+        Lampa.SettingsApi.addParam({ component: 'doramyclub', param: { name: 'doramy_row_news', type: 'trigger', default: true }, field: { name: 'Ряд «Вышли новые серии»' } });
+        Lampa.SettingsApi.addParam({ component: 'doramyclub', param: { name: 'doramy_row_watching', type: 'trigger', default: true }, field: { name: 'Ряд «Смотрю» на главной Lampa' } });
         Lampa.SettingsApi.addParam({ component: 'doramyclub', param: { name: 'doramy_net_title', type: 'title' }, field: { name: 'Сеть' } });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_gap', type: 'select', values: { '0': 'Без паузы', '250': '250 мс', '350': '350 мс', '600': '600 мс', '1000': '1 с' }, default: '350' },
+            field: { name: 'Пауза между запросами к сайту', description: 'Не больше 2 одновременных запросов; пауза бережёт сайт и слабые ТВ' }
+        });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_mirrors', type: 'input', values: '', default: '' },
+            field: { name: 'Зеркала сайта', description: 'Адреса через запятую; используются, если основной не отвечает. Добавляйте только адреса, подтверждённые самим сайтом: есть фишинговые клоны. Cookie аккаунта на зеркала не отправляется' }
+        });
         Lampa.SettingsApi.addParam({
             component: 'doramyclub',
             param: { name: 'doramy_proxy', type: 'input', values: '', default: '' },
@@ -2349,6 +3482,43 @@
         });
     }
 
+    function addMoreRows() {
+        if (!Lampa.ContentRows || !Lampa.ContentRows.add) return;
+        var mk = function (t) {
+            var c = toCard(t);
+            c.params = { emit: { onlyEnter: function () { openTitle(t); } } };
+            return c;
+        };
+        Lampa.ContentRows.add({
+            name: 'doramyclub_news',
+            title: 'Doramy.club: вышли новые серии',
+            index: 1,
+            screen: ['main'],
+            call: function () {
+                try {
+                    if (!setting('doramy_row_news', true)) return;
+                    var list = newsItems().slice(0, 15);
+                    if (!list.length) return;
+                    return function (call) { call({ results: list.map(mk), title: 'Doramy.club: вышли новые серии' }); };
+                } catch (e) { console.log('Doramy.club', 'row news', e); }
+            }
+        });
+        Lampa.ContentRows.add({
+            name: 'doramyclub_watching',
+            title: 'Doramy.club: смотрю',
+            index: 3,
+            screen: ['main'],
+            call: function () {
+                try {
+                    if (!setting('doramy_row_watching', true)) return;
+                    var list = markedItems('watching').slice(0, 15);
+                    if (!list.length) return;
+                    return function (call) { call({ results: list.map(mk), title: 'Doramy.club: смотрю' }); };
+                } catch (e) { console.log('Doramy.club', 'row watching', e); }
+            }
+        });
+    }
+
     function start() {
         console.log('Doramy.club', 'v' + VERSION);
         injectStyle();
@@ -2358,9 +3528,15 @@
         addSettings();
         addMenu();
         try { addGlobalSearch(); } catch (e) { console.log('Doramy.club', 'global search unavailable', e); }
-        try { addMainRows(); } catch (e) { console.log('Doramy.club', 'main rows unavailable', e); }
+        try { addMainRows(); addMoreRows(); } catch (e) { console.log('Doramy.club', 'main rows unavailable', e); }
+        document.addEventListener('visibilitychange', function () { if (!document.hidden) playingNow = false; });
+        // новые серии: напоминание при запуске (если есть)
+        setTimeout(function () {
+            checkNews(function (changed, count) { if (count) Lampa.Noty.show('Doramy.club: вышли новые серии — ' + count); });
+        }, 6000);
+        initCubSync();
         // фоновая синхронизация при запуске не чаще раза в час
-        if (accountOn() && Date.now() - (syncState().last || 0) > 3600000) setTimeout(function () { runSync(true); }, 4000);
+        if (accountOn() && !syncState().paused && Date.now() - (syncState().last || 0) > 3600000) setTimeout(function () { runSync(true); }, 4000);
     }
 
     if (window.appready) start();

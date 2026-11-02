@@ -47,7 +47,8 @@ function mk(opts) {
     delete global.window; delete global.document;
     w.addEventListener('error', function (e) { errors.push(e.message); });
 
-    var S = { idb: {}, tl: [], rows: [], store: {}, comps: {}, handlers: {}, log: [], cur: '', focused: null, act: { loader: function () {}, toggle: function () {} }, pushed: [], played: [], calls: [], notes: [] };
+    var S = { idb: opts.idb || {}, tl: [], rows: [], store: {}, comps: {}, handlers: {}, log: [], cur: '', focused: null, act: { loader: function () {}, toggle: function () {} }, pushed: [], played: [], calls: [], notes: [] };
+    S.store.doramy_gap = '0';
     if (opts.proxy) S.store.doramy_proxy = opts.proxy;
     if (opts.store) for (var k in opts.store) S.store[k] = opts.store[k];
 
@@ -65,7 +66,9 @@ function mk(opts) {
         Scroll: Scroll,
         Storage: {
             get: function (k, d) { var v = S.store[k]; if (v === undefined) v = d; if (v === 'true') return true; if (v === 'false') return false; if (typeof v === 'string' && /^\d+$/.test(v)) return parseInt(v, 10); return v === undefined ? '' : v; },
-            set: function (k, v) { S.store[k] = v; }
+            set: function (k, v) { S.store[k] = v; },
+            sync: function (name, type) { (S.synced = S.synced || []).push(name + ':' + type); },
+            clean: function (name) { (S.cleaned = S.cleaned || []).push(name); }
         },
         Utils: { hash: function (s) { return 'h' + s; }, copyTextToClipboard: function () {} },
         Timeline: {
@@ -95,28 +98,50 @@ function mk(opts) {
         },
         ContentRows: { add: function (r) { S.rows.push(r); } },
         Component: { add: function (n, c) { S.comps[n] = c; } },
+        TMDB: { api: function (u) { return 'https://tmdb.test/3/' + u; }, key: function () { return 'K'; } },
         Listener: { follow: function () {} },
         Reguest: function () {
+            this.silent = function (u, c) {
+                S.calls.push({ u: u, tmdb: true });
+                setTimeout(function () { c({ results: [{ id: 555, name: 'Esquire', first_air_date: '2024-03-01' }, { id: 556, name: 'Other', first_air_date: '2010-01-01' }] }); }, 1);
+            };
             this['native'] = function (u, c, e, post, opt) {
-                S.calls.push({ u: u, post: post, headers: (opt && opt.headers) || {} });
-                var body = route(u, post);
+                S.calls.push({ u: u, post: post, headers: (opt && opt.headers) || {}, t: Date.now() });
+                var body = route(u, post, (opt && opt.headers) || {});
                 setTimeout(function () { body === null ? e() : c(body); }, 1);
             };
         }
     };
 
     // Маршрутизатор фикстур: сайт и Kodik
-    function route(u, post) {
+    var pad = '<!--' + new Array(700).join('x') + '-->';
+    var CHALLENGE = '<html><head><meta name="robots" content="noindex"></head><body><script>function get_jhash(b){return 1} var c = get_param("__js_p_", "int", 0);</script></body></html>';
+    function route(u, post, headers) {
         if (opts.dead) return null;
+        var hm = u.match(/192\.168\.1\.5:8765\/cookie\?code=(\d+)/);
+        if (hm) return hm[1] === '123456' ? JSON.stringify({ cookie: 'wordpress_logged_in_x=1; __jhash_=7; __jua_=Mozilla%2F5.0%20Helper', ua: 'Mozilla/5.0 Helper', ts: 1 }) : null;
+        if (opts.gate && /doramy\.club/.test(u) && (headers.Cookie || '').indexOf('__jhash_') < 0) return CHALLENGE;
         var m;
-        if (/wp-admin\/admin-ajax\.php/.test(u)) { S.ajax = (S.ajax || []).concat([post]); return opts.ajax !== undefined ? opts.ajax : '<li>ok</li>'; }
+        if (/wp-admin\/admin-ajax\.php/.test(u)) {
+            if (/action=fast_ajax_search_akters/.test(u)) return F.FAST_AKTERS;
+            if (post && /action=rand_posts/.test(post)) { S.rand = (S.rand || []).concat([post]); return F.RAND_RESPONSE; }
+            if (post) S.ajax = (S.ajax || []).concat([post]);
+            return opts.ajax !== undefined ? opts.ajax : '<li>ok</li>';
+        }
+        if (opts.deadMain && /doramy\.club/.test(u)) return null;
+        if (/mirror\.example\/(serialy|1-novinki)/.test(u)) return F.LISTING;
         if (/doramy\.club\/regs-vash-profil/.test(u)) return opts.guest ? '<html><form id="loginform"></form></html>' : '<table><tr><th class="profpart1">Логин:</th><th class="profpart2">tester</th></tr><tr><th class="profpart1">E-mail:</th><th class="profpart2">tester@example.com</th></tr></table>';
         if (/doramy\.club\/regs-favorit/.test(u)) return opts.guest ? '<html>login</html>' : '<script>var wfmFavorites = {"url":"x","nonce":"abc123","postId":"8431"};</script>' + F.LISTING.replace(/<a class="next[^>]*>[^<]*<\/a>/, '');
         if (/doramy\.club\/regs-(budu|view|zakl|broh)/.test(u)) return '<div>пусто</div>';
         if (/doramy\.club\/(1-novinki|top|serialy|filmy)(\/page\/\d+)?$/.test(u)) return F.LISTING;
-        if (/doramy\.club\/?$/.test(u)) return '<a href="/genre/komediya">Комедия</a><a href="/god/2025">2025</a><a href="/strana/2-kitaj">Китай</a>';
+        if (/doramy\.club\/(page\/\d+)?$/.test(u)) return '<script>var sea_ajax = {"url":"x","nonce":"beef02"};</script><a href="/genre/komediya">Комедия</a><a href="/god/2025">2025</a><a href="/strana/2-kitaj">Китай</a>' + F.CAROU + F.ACTOR_PAGE.replace(/^[\s\S]*?(<section class="post-list">)/, '$1') + (opts.homeExtra || '') + pad;
+        if (/doramy\.club\/rand-cl/.test(u)) return '<script>var rand_obj = {"a_url":"x","nonce":"dead01"}</script>' + pad;
+        if (/doramy\.club\/podborki-luchshix-doram/.test(u)) return F.PODBORKI + pad;
+        if (/doramy\.club\/aktery-top/.test(u)) return F.AKTERY_TOP + pad;
+        if (/doramy\.club\/akter\//.test(u)) return F.ACTOR_PAGE + pad;
+        if (/doramy\.club\/navi-cl/.test(u)) return F.LISTING;
         if (/doramy\.club\/\?s=/.test(u)) return F.LISTING;
-        if (/doramy\.club\/48464-/.test(u)) return F.detailHtml(opts.player || F.UVK_ESQUIRE);
+        if (/doramy\.club\/48464-/.test(u)) return F.detailHtml(opts.player || F.UVK_ESQUIRE) + (opts.extra || '');
         if (/kodikplayer\.com\/assets\/js\//.test(u)) return 'var a=atob("L2Z0b3I="),b=atob("YWxsdmlkZW9tZXRyaWth");';
         if (/kodikplayer\.com\/ftor/.test(u)) return JSON.stringify({ links: { '720': [{ src: F.REAL_SRC, type: 'application/x-mpegURL' }], '360': [{ src: F.REAL_SRC, type: 'application/x-mpegURL' }] } });
         if ((m = u.match(/kodikplayer\.com\/(serial|season)\/(\d+)\//))) return m[2] === '69271' ? F.KODIK_PAGE : seasonPage(true);
@@ -162,7 +187,7 @@ function mk(opts) {
     ok(S.$(m.render()).find('.dc-btn--more').length === 1, 'есть «Загрузить ещё» (в фикстуре есть next)');
     m.start(); m.destroy();
     S = mk(); m = new S.comps.doramyclub_main({ query: 'корол' }); m.activity = S.act; m.create();
-    ok(await until(function () { return S.$(m.render()).find('.dc-card').length === 3; }), 'поиск: карточки');
+    ok(await until(function () { return S.$(m.render()).find('.dc-row').last().find('.dc-card').length === 3; }), 'поиск: карточки (последний раздел — найденные дорамы)');
     ok(S.calls.some(function (c) { return /\/\?s=%D0%BA%D0%BE%D1%80%D0%BE%D0%BB/.test(c.u); }), 'запрос поиска ушёл на /?s=');
     m.destroy();
 
@@ -233,13 +258,13 @@ function mk(opts) {
     var ac = S.calls.filter(function (c) { return /admin-ajax/.test(c.u); })[0];
     ok(ac.headers.Cookie === CK, 'cookie сессии уходит заголовком на сайт');
     ok(!S.calls.some(function (c) { return /kodikplayer/.test(c.u) && c.headers.Cookie; }), 'cookie не уходит на Kodik');
-    ok(S.store.doramy_sync.queue.length === 0, 'очередь пуста после отправки');
+    ok(await until(function () { return S.store.doramy_sync.queue.length === 0; }, 200), 'очередь пуста после отправки и подтверждения состояния');
     S.$(t.render()).find('.dc-btn').filter(function () { return /^В списки/.test(S.$(this).text()); }).trigger('hover:enter');
     S.sel.onSelect(S.sel.items[0]); // снять избранное
     ok(await until(function () { return S.ajax.length === 3; }, 200) && /action=wfm_del/.test(S.ajax[2]), 'снятие избранного: wfm_del');
     S.$(t.render()).find('.dc-btn').filter(function () { return /^В списки/.test(S.$(this).text()); }).trigger('hover:enter');
     S.sel.onSelect(S.sel.items.filter(function (i) { return i.status === 'done'; })[0]); // смена статуса: del старого + add нового
-    ok(await until(function () { return S.ajax.length === 5; }, 200) && /action=viewed_delh/.test(S.ajax[3]) && /action=zakl_add/.test(S.ajax[4]), 'смена статуса: viewed_delh → zakl_add');
+    ok(await until(function () { return S.ajax.length === 5; }, 200) && /action=viewed_del/.test(S.ajax[3]) && /action=zakl_add/.test(S.ajax[4]), 'смена статуса: viewed_del → zakl_add');
     t.destroy();
 
     console.log('6c. аккаунт: вход и синхронизация');
@@ -284,6 +309,54 @@ function mk(opts) {
     ok(S.store.doramy_marks['48464'].fav === true && !(S.store.doramy_sync && S.store.doramy_sync.queue && S.store.doramy_sync.queue.length), 'локальная отметка есть, очереди нет');
     t.destroy();
 
+    console.log('6g. cookie: заглушка, вставка, UA, перенос через CUB');
+    S = mk({ gate: true });
+    m = new S.comps.doramyclub_main({ catalog: { path: '/serialy', title: 'Сериалы' } }); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-empty').length; }, 200), 'заглушка проверки браузера без cookie — экран ошибки');
+    ok(/проверку браузера/.test(S.$(m.render()).find('.dc-empty').text()), 'текст ошибки про проверку браузера');
+    m.start();
+    ok(S.focused !== null, 'на экране ошибки есть что выбрать');
+    m.destroy();
+    S = mk({ gate: true, store: { doramy_cookie: 'wordpress_logged_in_x=1; __jhash_=7' } });
+    m = new S.comps.doramyclub_main({ catalog: { path: '/serialy', title: 'Сериалы' } }); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-card').length === 3; }, 200), 'с cookie, прошедшей проверку, каталог загружается');
+    m.destroy();
+
+    S = mk({ store: { doramy_cookie: 'wordpress_logged_in_x=1; __jua_=' + encodeURIComponent('Mozilla/5.0 Mine') } });
+    m = new S.comps.doramyclub_main({ catalog: { path: '/serialy', title: 'Сериалы' } }); m.activity = S.act; m.create();
+    await until(function () { return S.$(m.render()).find('.dc-card').length === 3; });
+    ok(/Windows NT/.test(S.calls.filter(function (c) { return /doramy\.club\/serialy/.test(c.u); })[0].headers['User-Agent']), 'по умолчанию UA плагина, UA из cookie не подставляется');
+    m.destroy();
+    S = mk({ store: { doramy_cookie: 'wordpress_logged_in_x=1; __jua_=' + encodeURIComponent('Mozilla/5.0 Mine'), doramy_use_cookie_ua: 'true' } });
+    m = new S.comps.doramyclub_main({ catalog: { path: '/serialy', title: 'Сериалы' } }); m.activity = S.act; m.create();
+    await until(function () { return S.$(m.render()).find('.dc-card').length === 3; });
+    ok(S.calls.filter(function (c) { return /doramy\.club\/serialy/.test(c.u); })[0].headers['User-Agent'] === 'Mozilla/5.0 Mine', 'по явной настройке UA берётся из cookie');
+    ok(S.calls.filter(function (c) { return /kodik/.test(c.u); }).every(function (c) { return c.headers['User-Agent'] !== 'Mozilla/5.0 Mine'; }), 'Kodik UA из cookie не получает');
+    m.destroy();
+
+    S = mk();
+    S.w.navigator.clipboard = { readText: function () { return Promise.resolve('Cookie: wordpress_logged_in_x=AAA;\n__jhash_=7'); } };
+    S.params.filter(function (x) { return x.param.name === 'doramy_cookie_paste'; })[0].onChange();
+    ok(await until(function () { return S.store.doramy_cookie === 'wordpress_logged_in_x=AAA; __jhash_=7'; }), 'вставка из буфера обмена нормализуется (префикс Cookie:, перевод строки)');
+    ok(S.notes.some(function (n) { return /Cookie вставлена \(2 шт\.\)/.test(n); }), 'сообщение о числе cookie');
+    S = mk();
+    S.params.filter(function (x) { return x.param.name === 'doramy_cookie_paste'; })[0].onChange();
+    ok(S.notes.some(function (n) { return /Буфер обмена недоступен/.test(n); }), 'нет буфера обмена — подсказка про помощника');
+    // перенос через CUB (Storage.sync): по умолчанию выключен; включённый — регистрирует ключи и подтягивает cookie на новом устройстве
+    S = mk();
+    ok(!S.synced || S.synced.length === 0, 'по умолчанию ключи в синхронизацию Lampa не регистрируются');
+    S = mk({ store: { doramy_cub_lists: 'true' } });
+    ok(S.synced && S.synced.indexOf('doramy_marks:object_object') >= 0 && S.synced.indexOf('doramy_state:object_object') >= 0 && S.synced.indexOf('doramy_cred:object_object') < 0, 'переключатель списков регистрирует только историю и списки');
+    S = mk({ store: { doramy_cub_cookie: 'true', doramy_cookie: 'wordpress_logged_in_x=MAC', doramy_cookie_ts: 100 } });
+    ok(S.synced.indexOf('doramy_cred:object_object') >= 0 && S.store.doramy_cred.cookie.v === 'wordpress_logged_in_x=MAC', 'устройство с cookie кладёт её в синхронизируемый ключ');
+    S = mk({ store: { doramy_cub_cookie: 'true', doramy_cred: { cookie: { v: 'wordpress_logged_in_x=FROM_CUB', ts: 500 } } } });
+    ok(S.store.doramy_cookie === 'wordpress_logged_in_x=FROM_CUB', 'новое устройство без cookie забирает её из синхронизации');
+    S = mk({ store: { doramy_cub_cookie: 'true', doramy_cookie: 'wordpress_logged_in_x=NEW', doramy_cookie_ts: 900, doramy_cred: { cookie: { v: 'wordpress_logged_in_x=OLD', ts: 100 } } } });
+    ok(S.store.doramy_cookie === 'wordpress_logged_in_x=NEW' && S.store.doramy_cred.cookie.v === 'wordpress_logged_in_x=NEW', 'более новая локальная cookie побеждает и обновляет облачную');
+    S = mk({ store: { doramy_cub_cookie: 'false', doramy_cred: { cookie: { v: 'X', ts: 1 } } } });
+    S.params.filter(function (x) { return x.param.name === 'doramy_cub_cookie'; })[0].onChange();
+    ok(S.cleaned && S.cleaned.indexOf('doramy_cred') >= 0 && !S.store.doramy_cred.cookie, 'выключение переноса стирает cookie из облака');
+
     console.log('7. только субтитры');
     var onlySubs = '<div class="player"><script> uvk.show([\n\'Озвучка\',\'Субтитры\',],[\n[],["kodikplayer.com%2Fseria%2F7%2Fbbb%2F720p","kodikplayer.com%2Fseria%2F8%2Fccc%2F720p",],]);</script></div>';
     S = mk({ player: onlySubs }); t = new S.comps.doramyclub_title({ item: item }); t.activity = S.act; t.create();
@@ -300,12 +373,209 @@ function mk(opts) {
     ok(S.$(S.focused).text() === 'Повторить', 'фокус на «Повторить»: ' + S.$(S.focused).text());
     t.destroy();
 
+    console.log('10. каталог: фильтр как на сайте, рандом, подборки, актёры, страна');
+    var sel = function (S, pred) { return S.sel.items.filter(pred)[0]; };
+    var btn = function (S, c, re) { return S.$(c.render()).find('.dc-btn').filter(function () { return re.test(S.$(this).text()); }); };
+    S = mk(); m = new S.comps.doramyclub_main({}); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-card').length >= 12; }, 200), 'дашборд с рядом «Популярное сейчас»');
+    ok(S.$(m.render()).find('.dc-row__title').first().text() === 'Популярное сейчас', 'первый ряд — популярное (карусель главной)');
+    m.start();
+    btn(S, m, /^Каталог/).trigger('hover:enter');
+    ok(await until(function () { return S.sel && S.sel.title === 'Каталог'; }, 100), 'меню каталога открылось');
+    var titles = S.sel.items.map(function (i) { return i.title; });
+    ok(['Фильтр (как на сайте)', 'Случайная дорама', 'Подборки', 'Расписание', 'Популярные актёры', 'Русские субтитры', 'Лакорны', 'Каналы ▸'].every(function (x) { return titles.indexOf(x) >= 0; }), 'в каталоге есть фильтр, рандом, подборки, расписание, актёры, перевод, лакорны, каналы');
+    S.sel.onSelect(sel(S, function (i) { return i.special === 'navi'; }));
+    await sleep(150);
+    ok(S.sel.title === 'Фильтр (как на сайте)' && S.sel.items.length === 13, 'экран фильтра: 11 параметров + «показать» + «сбросить»');
+    S.sel.onSelect(sel(S, function (i) { return i.k === 'razdel'; }));
+    await sleep(150);
+    S.sel.onSelect(sel(S, function (i) { return i.value === 'serialy'; }));
+    await sleep(150);
+    S.sel.onSelect(sel(S, function (i) { return i.k === 'sortRating'; }));
+    await sleep(150);
+    S.sel.onSelect(sel(S, function (i) { return i.k === 'genres'; }));
+    await sleep(150);
+    ok(S.sel.items.every(function (i) { return i.checkbox; }) && S.sel.items.length === 18, 'жанры — мультивыбор из 18 с чекбоксами');
+    var myst = sel(S, function (i) { return i.value === '35'; });
+    myst.checked = true; S.sel.onCheck(myst);
+    S.sel.onBack();
+    await sleep(150);
+    ok(/Жанры: Мистика/.test(sel(S, function (i) { return i.k === 'genres'; }).title) && /да/.test(sel(S, function (i) { return i.k === 'sortRating'; }).title), 'выбор запомнился в меню фильтра');
+    S.sel.onSelect(sel(S, function (i) { return i.go; }));
+    var pushedNavi = S.pushed[S.pushed.length - 1];
+    ok(pushedNavi.catalog.path === '/navi-cl' && pushedNavi.catalog.query === 'razdel=serialy&tag_zhanr%5B%5D=35&sort_rai=ratings', 'результаты фильтра: /navi-cl + query: ' + pushedNavi.catalog.query);
+    ok(JSON.stringify(S.store.doramy_navi.genres) === '["35"]', 'фильтр сохранён для следующего раза');
+    m.destroy();
+
+    var nm = new S.comps.doramyclub_main({ catalog: pushedNavi.catalog }); nm.activity = S.act; nm.create();
+    ok(await until(function () { return S.$(nm.render()).find('.dc-card').length === 3; }, 100), 'экран результатов фильтра отрисован');
+    ok(S.calls.some(function (c) { return /\/navi-cl\?razdel=serialy&tag_zhanr%5B%5D=35&sort_rai=ratings$/.test(c.u); }), 'запрос на /navi-cl с параметрами');
+    nm.start(); btn(S, nm, /Загрузить ещё/).trigger('hover:enter');
+    ok(await until(function () { return S.calls.some(function (c) { return /\/navi-cl\/page\/2\?razdel=serialy/.test(c.u); }); }, 100), 'пагинация собирается самим плагином: /navi-cl/page/2?... (без «#038;»)');
+    nm.destroy();
+
+    S = mk(); m = new S.comps.doramyclub_main({}); m.activity = S.act; m.create();
+    await until(function () { return S.$(m.render()).find('.dc-card').length >= 12; }, 200); m.start();
+    btn(S, m, /^Случайная/).trigger('hover:enter');
+    ok(await until(function () { return S.sel && /Восемнадцать/.test(S.sel.title); }, 200), 'случайная дорама найдена и показана');
+    ok(S.rand.length === 1 && /action=rand_posts/.test(S.rand[0]) && /security=dead01/.test(S.rand[0]), 'POST rand_posts с nonce со страницы /rand-cl');
+    ok(/Южная Корея/.test(S.sel.items[0].subtitle) && /8\.9/.test(S.sel.items[0].subtitle), 'подпись: страна, число серий, рейтинг');
+    S.sel.onSelect(sel(S, function (i) { return i.act === 'info'; }));
+    ok(S.modal && /Восемнадцать/.test(S.modal.title) && /Главные роли: Син Йе Ын/.test(S.modal.html.text()), 'описание и главные роли');
+    S.sel = null;
+    btn(S, m, /^Случайная/).trigger('hover:enter');
+    await until(function () { return S.sel; }, 100);
+    S.sel.onSelect(sel(S, function (i) { return i.act === 'open'; }));
+    ok(S.pushed[S.pushed.length - 1].item.id === '8973', 'кнопка «Открыть» ведёт на страницу тайтла');
+    m.destroy();
+
+    S = mk(); m = new S.comps.doramyclub_main({ mode: 'podborki' }); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-card').length === 2; }, 100), 'экран подборок: 2 обложки');
+    m.start(); S.$(S.$(m.render()).find('.dc-card')[0]).trigger('hover:enter');
+    ok(S.pushed[S.pushed.length - 1].catalog.path === '/razdel/doramy-pro-izmenu-v-otnosheniyax', 'подборка открывает каталог раздела');
+    m.destroy();
+
+    S = mk(); m = new S.comps.doramyclub_main({ mode: 'actorsTop' }); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-card').length === 2; }, 100), 'популярные актёры: 2 карточки');
+    m.start(); S.$(S.$(m.render()).find('.dc-card')[1]).trigger('hover:enter');
+    ok(S.pushed[S.pushed.length - 1].catalog.path === '/akter/1-son-kan', 'актёр открывает его каталог');
+    m.destroy();
+
+    S = mk(); m = new S.comps.doramyclub_main({ catalog: { path: '/akter/kim-yu-chzhon', title: 'Ким Ю Чжон', query: '' } }); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-actor').length === 1; }, 100), 'шапка актёра');
+    ok(/Рост: 165 см/.test(S.$(m.render()).find('.dc-actor').text()) && /Ким Ю Чжон \(1999\)/.test(S.$(m.render()).find('.dc-actor').text()), 'факты актёра: рост, имя');
+    ok(/Главная роль/.test(S.$(m.render()).find('.dc-card__sub').text()), 'бейдж «Главная роль» на карточке');
+    m.start(); btn(S, m, /Роли: все/).trigger('hover:enter');
+    ok(S.replaced && S.replaced.catalog.query === 'akter_role=main', 'переключатель «только главные роли»: ?akter_role=main');
+    m.destroy();
+
+    S = mk(); m = new S.comps.doramyclub_main({ query: 'Ким Ю' }); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-row__title').length === 2; }, 100), 'в поиске два раздела: актёры и дорамы');
+    ok(S.$(m.render()).find('.dc-row__title').first().text() === 'Актёры' && S.$(m.render()).find('.dc-row').first().find('.dc-card').length === 2, 'актёры найдены через быстрый поиск сайта');
+    ok(S.calls.some(function (c) { return /action=fast_ajax_search_akters/.test(c.u) && /security=beef02/.test(c.u); }), 'запрос с nonce sea_ajax');
+    m.destroy();
+
+    S = mk(); m = new S.comps.doramyclub_main({ catalog: { path: '/genre/komediya', title: 'Жанр: Комедия', query: '' } }); m.activity = S.act; m.create();
+    await until(function () { return S.$(m.render()).find('.dc-card').length === 3; }, 100); m.start();
+    btn(S, m, /Страна: Все страны/).trigger('hover:enter');
+    S.sel.onSelect(sel(S, function (i) { return i.value === 'koreya'; }));
+    ok(S.replaced.catalog.query === 'st_strana=koreya', 'фильтр страны в жанре: ?st_strana=koreya');
+    m.destroy();
+    S = mk(); m = new S.comps.doramyclub_main({ catalog: { path: '/serialy', title: 'Сериалы', query: '' } }); m.activity = S.act; m.create();
+    await until(function () { return S.$(m.render()).find('.dc-card').length === 3; }, 100);
+    ok(btn(S, m, /^Страна/).length === 0, 'у разделов без поддержки страны кнопки «Страна» нет');
+    m.destroy();
+
+    console.log('11. новые серии и расписание');
+    var home48464 = '<section class="post-list"> <div class="img-link"> <a href="https://doramy.club/48464-1-eskvajr.html"><img src="https://doramy.club/wp-content/uploads/2024/01/1-eskvajr-340x470.jpg" alt="" /><span>1 эсквайр</span></a> </div> <em>Esquire</em><table> <tbody> <tr><td><u>Южная Корея, 2024</u></td></tr> <tr><td><u>Драма</u></td></tr> </tbody> </table> <table class="table-hom"> <tbody class="tbody-hom"> <tr><td colspan="2"><span class="i1">Сериал: </span>12 серий</td></tr><tr><td colspan="2"><span class="i1">Озвучка:</span><i class="s2"><b>5</b> серия</i></td></tr><tr><td colspan="2"><span class="i1">Субтитры:</span><i class="s2"><b>6</b> серия</i></td></tr></tbody> </table> <div class="status">Выходит</div></section>';
+    var st48464 = { id: '48464', url: 'https://doramy.club/48464-1-eskvajr.html', title: '1 эсквайр', orig: 'Esquire', poster: '', year: 2024, country: 'Южная Корея', last: 1, lastName: '1 серия', idx: 0, count: 12, ts: 5 };
+    S = mk({ homeExtra: home48464, store: { doramy_state: { '48464': st48464 }, doramy_epseen: { '48464': { v: 3, s: 6 } } } });
+    m = new S.comps.doramyclub_main({}); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-row__title').filter(function () { return /Вышли новые серии/.test(S.$(this).text()); }).length === 1; }, 200), 'на дашборде появился ряд «Вышли новые серии»');
+    ok(/\+2 оз\./.test(S.$(m.render()).find('.dc-card__badge').filter(function () { return /\+/.test(S.$(this).text()); }).first().text()), 'бейдж «+2 оз.» (было 3, стало 5)');
+    ok(S.store.doramy_news['48464'].dv === 2 && S.store.doramy_news['48464'].ds === 0, 'новость сохранена: озвучка +2, субтитры без изменений');
+    ok(S.calls.filter(function (c) { return /doramy\.club\/(page\/\d)?$/.test(c.u); }).length === 3, 'прочитаны 3 страницы ленты (лента + page/2 + page/3)');
+    m.destroy();
+    var nn = new S.comps.doramyclub_main({ mode: 'news' }); nn.activity = S.act; nn.create();
+    ok(await until(function () { return S.$(nn.render()).find('.dc-card').length === 1; }, 100), 'экран «Новые серии»');
+    nn.destroy();
+    var tt = new S.comps.doramyclub_title({ item: { id: '48464', url: 'https://doramy.club/48464-1-eskvajr.html', title: '1 эсквайр', poster: '', orig: 'Esquire' } }); tt.activity = S.act; tt.create();
+    await until(function () { return S.$(tt.render()).find('.dc-ep').length === 3; }, 100);
+    ok(!S.store.doramy_news['48464'] && S.store.doramy_epseen['48464'].v === 8, 'открытие страницы тайтла гасит новость и обновляет «увиденное»');
+    ok(S.store.doramy_schedule['48464'] && S.store.doramy_schedule['48464'].days[0] === 5, 'расписание сохранено: суббота (из текста сайта)');
+    tt.destroy();
+
+    S = mk({ store: { doramy_marks: { '48464': { fav: false, status: 'watching', item: { id: '48464', url: 'https://doramy.club/48464-1-eskvajr.html', title: '1 эсквайр', poster: '' }, ts: 1 } } } });
+    m = new S.comps.doramyclub_main({ mode: 'schedule' }); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-row__title').length >= 1; }, 150), 'экран расписания построен по дорамам «Смотрю»');
+    ok(S.$(m.render()).find('.dc-row__title').filter(function () { return /Суббота/.test(S.$(this).text()); }).length === 1 && S.$(m.render()).find('.dc-card').length === 1, 'дорама стоит в дне «Суббота»');
+    m.destroy();
+    S = mk(); m = new S.comps.doramyclub_main({ mode: 'schedule' }); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-empty').length; }, 100) && /Расписание пусто/.test(S.$(m.render()).find('.dc-empty').text()), 'пустое расписание объясняет, как его наполнить');
+    m.start(); ok(S.focused !== null, 'на пустом расписании есть что выбрать');
+    m.destroy();
+    S = mk({ store: { doramy_news_on: 'false', doramy_state: { '48464': st48464 } }, homeExtra: home48464 });
+    m = new S.comps.doramyclub_main({}); m.activity = S.act; m.create();
+    await until(function () { return S.$(m.render()).find('.dc-card').length >= 12; }, 200); await sleep(300);
+    ok(!S.store.doramy_news, 'при выключенной проверке новости не собираются');
+    m.destroy();
+
+    console.log('12. страница тайтла: заставка, TMDB, отзывы, «В ролях», подборки, Автоперевод');
+    var EXTRA = '<meta property="og:image" content="https://doramy.club/wp-content/uploads/2024/01/hd.jpg"><span itemprop="ratingCount">2&nbsp;996</span><ul class="podbor-s"><li><a href="https://doramy.club/razdel/doramy-pro-shkolu"><img src="/x.jpg" alt="Дорамы про школу"></a></li></ul>' + F.COMMENTS_HTML;
+    var itemO = { id: '48464', url: 'https://doramy.club/48464-1-eskvajr.html', title: '1 эсквайр', poster: '', orig: 'Esquire' };
+    S = mk({ extra: EXTRA, store: { doramy_sync: { last: Date.now() } } });
+    t = new S.comps.doramyclub_title({ item: itemO }); t.activity = S.act; t.create();
+    ok(await until(function () { return S.$(t.render()).find('.dc-ep').length === 3; }, 100), 'страница с расширенной разметкой');
+    t.start();
+    ok(S.$(t.render()).find('.dc-title__rate').text() === '9.7 · 2996 оц.', 'рейтинг с числом оценок: ' + S.$(t.render()).find('.dc-title__rate').text());
+    ok(S.$(t.render()).find('.dc-title__poster img').attr('src') === 'https://doramy.club/wp-content/uploads/2024/01/hd.jpg', 'постер — HD из og:image');
+    ok(S.$(t.render()).find('.dc-row--sim').first().find('.dc-sim').length === 2 && /В ролях/.test(S.$(t.render()).find('.dc-row--sim .dc-row__title').first().text()), 'ряд «В ролях» с актёрами (2)');
+    S.$(S.$(t.render()).find('.dc-row--sim').first().find('.dc-sim')[0]).trigger('hover:enter');
+    ok(S.pushed[S.pushed.length - 1].catalog.path === '/akter/li-dzhin-uk', 'актёр из «В ролях» открывает его каталог');
+    btn(S, t, /^Подборки/).trigger('hover:enter');
+    ok(S.sel.items[0].path === '/razdel/doramy-pro-shkolu', 'кнопка «Подборки» ведёт в раздел');
+    btn(S, t, /^Отзывы \(2\)/).trigger('hover:enter');
+    ok(/Отзывы/.test(S.modal.title) && /спойлеры/.test(S.modal.html.text()) && /ZHDS/.test(S.modal.html.text()) && /закрыты/.test(S.modal.html.text()), 'отзывы: спойлер-предупреждение, текст, «закрыты»');
+    btn(S, t, /^Карточка Lampa/).trigger('hover:enter');
+    ok(await until(function () { return S.pushed[S.pushed.length - 1].component === 'full'; }, 100), 'TMDB: открыта полная карточка Lampa');
+    var full = S.pushed[S.pushed.length - 1];
+    ok(full.id === 555 && full.method === 'tv' && full.source === 'tmdb', 'выбран TMDB 555 по совпадению года (2024), а не первый попавшийся: ' + full.id);
+    ok(S.calls.some(function (c) { return c.tmdb && /query=Esquire/.test(c.u) && /first_air_date_year=2024/.test(c.u); }), 'поиск TMDB по оригинальному названию + год');
+    ok(S.store.doramy_tmdb['48464'].id === 555, 'совпадение закешировано');
+    // метка заставки → segments в плеере
+    S.$(S.$(t.render()).find('.dc-ep')[0]).trigger('hover:long');
+    var skipItem = sel(S, function (i) { return /Задать пропуск заставки/.test(i.title); });
+    ok(!!skipItem, 'в меню серии есть «Задать пропуск заставки…»');
+    S.sel.onSelect(skipItem);
+    ok(typeof S.input === 'function', 'открыт ввод времени');
+    S.input('bad'); ok(S.notes.some(function (n) { return /Формат: мм:сс/.test(n); }), 'неверный формат отклонён');
+    S.input('1:30-2:45');
+    ok(JSON.stringify(S.store.doramy_skip['48464:Озвучка — LE-Production']) === '{"start":90,"end":165}', 'метка сохранена на тайтл и озвучку');
+    S.$(S.$(t.render()).find('.dc-ep')[0]).trigger('hover:enter');
+    ok(await until(function () { return S.played.length === 1; }, 200), 'серия запущена');
+    ok(S.played[0].segments && S.played[0].segments.skip[0].start === 90 && S.played[0].segments.skip[0].end === 165 && S.playlist[0].segments, 'в плеер передан segments.skip (Lampa покажет «Пропустить»)');
+    S.cb && S.cb();
+    t.destroy();
+
+    var AUTO = '<div class="player"><script> uvk.show([\n\'Автоперевод\',],[\n["kodikplayer.com%2Fserial%2F69271%2F81aaca2db531389e25bae791e5ff417e%2F720p",],]);</script></div>';
+    S = mk({ player: AUTO });
+    t = new S.comps.doramyclub_title({ item: item }); t.activity = S.act; t.create();
+    ok(await until(function () { return S.$(t.render()).find('.dc-ep').length === 4; }, 150), '«Автоперевод» раскрыт в список серий Kodik (4 с пропуском)');
+    ok(S.$(t.render()).find('.dc-ep.nolink').length === 1, 'неозвученная серия помечена');
+    t.destroy();
+
+    console.log('13. зеркала, офлайн-кеш, пауза между запросами');
+    S = mk({ deadMain: true, store: { doramy_mirrors: 'https://mirror.example', doramy_cookie: 'wordpress_logged_in_x=SECRET' } });
+    m = new S.comps.doramyclub_main({ catalog: { path: '/serialy', title: 'Сериалы', query: '' } }); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-card').length === 3; }, 200), 'основной адрес не отвечает — каталог загружен с зеркала');
+    ok(S.calls.some(function (c) { return /mirror\.example\/serialy/.test(c.u); }), 'запрос ушёл на зеркало');
+    ok(S.calls.filter(function (c) { return /mirror\.example/.test(c.u); }).every(function (c) { return !c.headers.Cookie; }), 'cookie аккаунта на зеркало не отправляется');
+    ok(S.calls.filter(function (c) { return /^https:\/\/doramy\.club/.test(c.u); }).every(function (c) { return c.headers.Cookie; }), 'на основной адрес cookie отправляется');
+    m.destroy();
+
+    var shared = {};
+    S = mk({ idb: shared }); m = new S.comps.doramyclub_main({ catalog: { path: '/serialy', title: 'Сериалы', query: '' } }); m.activity = S.act; m.create();
+    await until(function () { return S.$(m.render()).find('.dc-card').length === 3; }, 100); await sleep(80);
+    ok(Object.keys(shared).some(function (k) { return /^doramy_pg_/.test(k) && shared[k].html; }), 'страница сохранена в офлайн-кеш (IndexedDB)');
+    m.destroy();
+    S = mk({ idb: shared, proxy: 'http://127.0.0.1:9/?u=' }); m = new S.comps.doramyclub_main({ catalog: { path: '/serialy', title: 'Сериалы', query: '' } }); m.activity = S.act; m.create();
+    ok(await until(function () { return S.$(m.render()).find('.dc-card').length === 3; }, 300), 'без сети страница показана из офлайн-кеша');
+    ok(S.notes.some(function (n) { return /офлайн-кеш/.test(n); }), 'пользователю сказано, что это офлайн-кеш');
+    m.destroy();
+
+    S = mk({ store: { doramy_gap: '300' } }); m = new S.comps.doramyclub_main({}); m.activity = S.act; m.create();
+    await until(function () { return S.$(m.render()).find('.dc-card').length >= 12; }, 400);
+    var times = S.calls.filter(function (c) { return /doramy\.club/.test(c.u); }).map(function (c) { return c.t; }).sort(function (a, b) { return a - b; });
+    var gaps = []; for (var gi = 1; gi < times.length; gi++) gaps.push(times[gi] - times[gi - 1]);
+    ok(times.length >= 5 && gaps.every(function (g) { return g >= 250; }), 'между стартами запросов к сайту пауза ≥ 250 мс при настройке 300: ' + gaps.join(','));
+    m.destroy();
+
     console.log('9. регистрация: меню, настройки, поиск, ряды');
     S = mk();
     ok(S.$('.menu__list [data-action="doramyclub"]').length === 1, 'пункт меню добавлен');
     ok(S.params && S.params.length >= 14, 'настройки зарегистрированы');
     ok(S.source && S.source.title === 'Doramy.club', 'источник глобального поиска');
-    ok(S.rows.length === 2, 'ряды главного экрана');
+    ok(S.rows.length === 4, 'ряды главного экрана (продолжить, избранное, новые серии, смотрю)');
 
     console.log('\n' + pass + ' ok, ' + failn + ' fail' + (errors.length ? ', JS errors: ' + errors.join('; ') : ''));
     process.exit(failn || errors.length ? 1 : 0);
