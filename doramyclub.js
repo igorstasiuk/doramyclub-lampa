@@ -8,7 +8,7 @@
 (function () {
     'use strict';
 
-    var VERSION = '0.1.0';
+    var VERSION = '0.2.0';
     var DEFAULT_BASE = 'https://doramy.club';
     var KODIK = 'https://kodikplayer.com';
     var CACHE_TTL = 10 * 60 * 1000;
@@ -41,6 +41,16 @@
             ['2016', '/god/2016'], ['2015', '/god/2015']
         ]
     };
+
+    // Списки аккаунта сайта: плагин gid-favorites (WordPress admin-ajax: action + postId + security=nonce, cookie сессии)
+    var LIST_ACTIONS = {
+        fav: { add: 'wfm_add', del: 'wfm_del', page: '/regs-favorit' },
+        later: { add: 'budu_add', del: 'budu_delh', page: '/regs-budu' },
+        watching: { add: 'viewed_add', del: 'viewed_delh', page: '/regs-view' },
+        done: { add: 'zakl_add', del: 'zakl_delh', page: '/regs-zakl' },
+        dropped: { add: 'broh_add', del: 'broh_delh', page: '/regs-broh' }
+    };
+    var STATUS_PRIORITY = ['watching', 'later', 'done', 'dropped'];
 
     var LISTS = { fav: 'Избранное', later: 'На потом', watching: 'Смотрю', done: 'Просмотрено', dropped: 'Брошено' };
     var LIST_KEYS = ['fav', 'later', 'watching', 'done', 'dropped'];
@@ -370,6 +380,76 @@
         return (h ? h + ':' + p(m) : m) + ':' + p(s);
     }
 
+    // nonce для admin-ajax лежит в инлайн-переменной wfmFavorites на страницах сайта
+    function parseNonce(html) {
+        var m = ('' + html).match(/wfmFavorites\s*=\s*\{[^}]*?"nonce"\s*:\s*"([a-f0-9]+)"/);
+        return m ? m[1] : '';
+    }
+
+    // Логин из «Ваш профиль»: первая ячейка profpart2 — логин, вторая — e-mail (её не читаем и не храним)
+    function parseAccountName(html) {
+        var m = ('' + html).match(/<th class="profpart2">\s*([^<\s][^<]*?)\s*<\/th>/);
+        return m ? strip(m[1]) : '';
+    }
+
+    // Страница личного списка: карточки как в каталоге; запасной вариант — ссылки на тайтлы
+    function parseAccountList(html, base) {
+        var items = parseListing(html, base);
+        if (items.length) return items;
+        var seen = {};
+        ('' + html).replace(/<a[^>]+href="([^"]*\/\d+-[^"\/]*\.html)"[^>]*>([\s\S]*?)<\/a>/g, function (m, href, inner) {
+            var id = postId(href);
+            if (!id || seen[id]) return m;
+            var img = inner.match(/<img[^>]+src="([^"]+)"/), title = strip(inner);
+            if (!title) return m;
+            seen[id] = 1;
+            items.push({ id: id, url: absUrl(href, base), poster: img ? absUrl(img[1], base) : '', title: title, orig: '', country: '', year: 0, genres: '', info: '', rating: 0, mini: false });
+            return m;
+        });
+        return items;
+    }
+
+    // Слияние локальных отметок и списков аккаунта.
+    //   local   — { id: { fav, status, item, ts } }
+    //   remote  — { fav: {id: item}, later: {...}, watching: {...}, done: {...}, dropped: {...} }
+    //   pending — { id: true } для тайтлов с неотправленными операциями (локальная версия главнее)
+    //   initDone — false при первой синхронизации: объединяем (union), чтобы ничего не потерять с обеих сторон
+    // Возвращает { marks, ops }: итоговые отметки и операции, которые надо отправить на сайт.
+    function mergeMarks(local, remote, pending, initDone) {
+        var marks = {}, ops = [], ids = {}, rs = {}, id;
+        LIST_KEYS.forEach(function (kind) {
+            var m = remote[kind] || {};
+            for (var rid in m) {
+                if (!m.hasOwnProperty(rid)) continue;
+                var r0 = rs[rid] || (rs[rid] = { fav: false, status: '', item: m[rid] });
+                if (kind === 'fav') r0.fav = true;
+                else if (!r0.status || STATUS_PRIORITY.indexOf(kind) < STATUS_PRIORITY.indexOf(r0.status)) r0.status = kind;
+            }
+        });
+        for (id in local) if (local.hasOwnProperty(id)) ids[id] = 1;
+        for (id in rs) if (rs.hasOwnProperty(id)) ids[id] = 1;
+        for (id in ids) {
+            if (!ids.hasOwnProperty(id)) continue;
+            var l = local[id], r = rs[id], item = (r && r.item) || (l && l.item), res;
+            if (pending && pending[id]) {
+                res = l;
+            } else if (!initDone && l) {
+                res = { fav: !!(l.fav || (r && r.fav)), status: l.status || (r ? r.status : ''), item: item, ts: l.ts };
+                if (l.fav && !(r && r.fav)) ops.push({ id: id, kind: 'fav', op: 'add' });
+                if (l.status && (!r || r.status !== l.status)) {
+                    if (r && r.status) ops.push({ id: id, kind: r.status, op: 'del' });
+                    ops.push({ id: id, kind: l.status, op: 'add' });
+                }
+            } else if (r) {
+                res = { fav: r.fav, status: r.status, item: item, ts: (l && l.ts) || 0 };
+            } else {
+                res = undefined; // удалено на сайте
+            }
+            if (res && (res.fav || res.status)) marks[id] = res;
+        }
+        return { marks: marks, ops: ops };
+    }
+
     function looksLikeChallenge(html) {
         html = '' + html;
         return html.indexOf('__js_p_') >= 0 && html.indexOf('get_jhash') >= 0 && html.indexOf('post-list') < 0;
@@ -380,7 +460,8 @@
             VERSION: VERSION, FALLBACK_MENU: FALLBACK_MENU, parseListing: parseListing, hasNext: hasNext, parseMenu: parseMenu,
             parseDetail: parseDetail, parseKodikLink: parseKodikLink, kodikUrl: kodikUrl, parseKodikPage: parseKodikPage,
             parseKodikParams: parseKodikParams, decodeKodik: decodeKodik, parseFtor: parseFtor, pickQuality: pickQuality,
-            listPath: listPath, searchPath: searchPath, fmtTime: fmtTime, looksLikeChallenge: looksLikeChallenge, strip: strip
+            listPath: listPath, searchPath: searchPath, fmtTime: fmtTime, looksLikeChallenge: looksLikeChallenge, strip: strip,
+            LIST_ACTIONS: LIST_ACTIONS, parseNonce: parseNonce, parseAccountName: parseAccountName, parseAccountList: parseAccountList, mergeMarks: mergeMarks
         };
     }
 
@@ -543,6 +624,7 @@
         var ids = Object.keys(st).sort(function (a, b) { return st[b].ts - st[a].ts; });
         ids.slice(60).forEach(function (id) { delete st[id]; });
         Lampa.Storage.set('doramy_state', st);
+        if (setting('doramy_auto_status', false) && !marksOf(t.id).status) setMark(t, { status: 'watching' });
     }
 
     function historyList() {
@@ -557,9 +639,11 @@
 
     function setMark(t, patch) {
         var all = getMap('doramy_marks'), cur = all[t.id] || { fav: false, status: '' };
-        all[t.id] = $.extend({}, cur, patch, { item: brief(t), ts: Date.now() });
-        if (!all[t.id].fav && !all[t.id].status) delete all[t.id];
+        var next = $.extend({}, cur, patch, { item: brief(t), ts: Date.now() });
+        if (!next.fav && !next.status) delete all[t.id];
+        else all[t.id] = next;
         Lampa.Storage.set('doramy_marks', all);
+        markChanged(t.id, cur, next);
     }
 
     function markedItems(kind) {
@@ -598,6 +682,7 @@
                 headers['X-Requested-With'] = 'XMLHttpRequest';
             }
             if (opts.referer) headers.Referer = opts.referer;
+            if (opts.site && cookie()) headers.Cookie = cookie();
             new Lampa.Reguest().native(url, function (str) {
                 typeof str === 'string' ? ok(str) : direct();
             }, direct, opts.post || false, { dataType: 'text', headers: headers });
@@ -611,7 +696,7 @@
         var url = absUrl(path, base());
         var hit = pageMem[url];
         if (!force && hit && Date.now() - hit.ts < CACHE_TTL) return ok(hit.html);
-        net(url, { referer: base() + '/' }, function (html) {
+        net(url, { referer: base() + '/', site: true }, function (html) {
             if (looksLikeChallenge(html)) return fail('challenge');
             if (typeof html !== 'string' || html.length < 500) return fail('empty');
             pageMem[url] = { ts: Date.now(), html: html };
@@ -744,6 +829,185 @@
 
     function trackTitle(tr) {
         return tr.title + (tr.subs && !/субтитр/i.test(tr.title) ? ' (субтитры)' : '');
+    }
+
+
+    /* ---------- аккаунт сайта и синхронизация списков ---------- */
+
+    // Cookie сессии вставляется в настройках (из вашего браузера после входа на сайт). Пароль плагин не принимает и не хранит:
+    // слой запросов Lampa не отдаёт Set-Cookie, поэтому получить сессию входом по паролю из плагина нельзя.
+    function cookie() { return ('' + setting('doramy_cookie', '')).trim(); }
+
+    function accountOn() { return !!cookie() && !!setting('doramy_sync_on', true); }
+
+    function syncState() {
+        var s = getMap('doramy_sync');
+        if (!s.queue) s.queue = [];
+        return s;
+    }
+
+    function saveSync(s) { Lampa.Storage.set('doramy_sync', s); }
+
+    function accountInfo() { return getMap('doramy_account'); }
+
+    var nonceMem = null, flushing = false, flushTimer = null, syncing = false;
+
+    function markChanged(id, before, after) {
+        if (!accountOn()) return;
+        if (!!before.fav !== !!after.fav) syncEnqueue(id, 'fav', after.fav ? 'add' : 'del');
+        if ((before.status || '') !== (after.status || '')) {
+            if (before.status) syncEnqueue(id, before.status, 'del');
+            if (after.status) syncEnqueue(id, after.status, 'add');
+        }
+    }
+
+    function syncEnqueue(id, kind, op) {
+        var s = syncState();
+        // add, за которым сразу идёт del того же (и наоборот), взаимно гасятся
+        var last = s.queue[s.queue.length - 1];
+        if (last && last.id === id && last.kind === kind && last.op !== op) s.queue.pop();
+        else s.queue.push({ id: id, kind: kind, op: op, ts: Date.now(), tries: 0 });
+        saveSync(s);
+        clearTimeout(flushTimer);
+        flushTimer = setTimeout(function () {
+            flushQueue(function (okAll) { if (!okAll) Lampa.Noty.show('Doramy.club: не удалось отправить изменения на сайт, повторю при следующей синхронизации'); });
+        }, 1500);
+    }
+
+    function getNonce(ok, fail, force) {
+        if (!force && nonceMem && Date.now() - nonceMem.ts < 20 * 60 * 1000) return ok(nonceMem.v);
+        net(absUrl('/regs-favorit', base()), { site: true, referer: base() + '/' }, function (html) {
+            if (looksLikeChallenge(html)) return fail('challenge');
+            var n = parseNonce(html);
+            if (!n) return fail('noauth');
+            nonceMem = { v: n, ts: Date.now() };
+            ok(n);
+        }, function (e) { fail(e || 'error'); });
+    }
+
+    // Одно действие над списком: admin-ajax.php, action = wfm_add / budu_delh / ...
+    function siteAction(kind, op, id, ok, fail, retried) {
+        var a = LIST_ACTIONS[kind];
+        if (!a) return fail('rejected');
+        getNonce(function (nonce) {
+            net(absUrl('/wp-admin/admin-ajax.php', base()), { site: true, referer: base() + '/', post: enc({ security: nonce, action: a[op], postId: id }) }, function (res) {
+                var t = ('' + res).trim();
+                if (t === '-1' || t === '0') {
+                    if (!retried) { nonceMem = null; return siteAction(kind, op, id, ok, fail, true); }
+                    return fail('rejected');
+                }
+                ok();
+            }, function (e) { fail(e || 'error'); });
+        }, function (e) { fail(e); }, !!retried);
+    }
+
+    // Отправляет очередь по одной операции. Операция, которую сайт два раза отклонил или которая не прошла 5 раз, отбрасывается.
+    function flushQueue(done) {
+        if (flushing) return done && done(false);
+        if (!syncState().queue.length) return done && done(true);
+        flushing = true;
+        (function next() {
+            var s = syncState(), op = s.queue[0];
+            if (!op) { flushing = false; return done && done(true); }
+            siteAction(op.kind, op.op, op.id, function () {
+                s.queue.shift();
+                saveSync(s);
+                next();
+            }, function (err) {
+                op.tries = (op.tries || 0) + 1;
+                var drop = op.tries >= 5 || (err === 'rejected' && op.tries >= 2);
+                if (drop) s.queue.shift();
+                saveSync(s);
+                if (drop) return next();
+                flushing = false;
+                done && done(false);
+            });
+        })();
+    }
+
+    // Проверка сессии: страница профиля показывает логин только вошедшему
+    function checkSession(ok, fail) {
+        net(absUrl('/regs-vash-profil', base()), { site: true, referer: base() + '/' }, function (html) {
+            if (looksLikeChallenge(html)) return fail('challenge');
+            var login = parseAccountName(html);
+            if (!login) return fail('noauth');
+            Lampa.Storage.set('doramy_account', { login: login, ts: Date.now() });
+            ok(login);
+        }, function (e) { fail(e || 'error'); });
+    }
+
+    function pullList(kind, ok, fail) {
+        var out = {}, page = 1;
+        (function next() {
+            net(absUrl(listPath(LIST_ACTIONS[kind].page, page), base()), { site: true, referer: base() + '/' }, function (html) {
+                if (looksLikeChallenge(html)) return fail('challenge');
+                var n = parseNonce(html);
+                if (n) nonceMem = { v: n, ts: Date.now() };
+                parseAccountList(html, base()).forEach(function (t) { out[t.id] = brief(t); });
+                if (hasNext(html) && page < 30) { page++; next(); } else ok(out);
+            }, function (e) { fail(e || 'error'); });
+        })();
+    }
+
+    function syncErrorText(e) {
+        if (e === 'noauth') return 'Сессия не принята: войдите на сайт в браузере и вставьте cookie заново';
+        return errorText(e);
+    }
+
+    // Полная синхронизация: сессия → отправить очередь → забрать 5 списков → слить → отправить то, что есть только у нас
+    function syncAll(cb) {
+        if (syncing) return cb && cb('busy');
+        if (!cookie()) return cb && cb('noauth');
+        syncing = true;
+        var finish = function (err, info) { syncing = false; cb && cb(err, info); };
+        checkSession(function (login) {
+            flushQueue(function () {
+                var remote = {}, kinds = LIST_KEYS.slice(), failed = null;
+                (function nextKind() {
+                    var kind = kinds.shift();
+                    if (!kind) return merge();
+                    pullList(kind, function (items) { remote[kind] = items; nextKind(); }, function (e) { failed = e; finish(e); });
+                })();
+                function merge() {
+                    if (failed) return;
+                    var st = syncState(), pending = {};
+                    st.queue.forEach(function (q) { pending[q.id] = true; });
+                    var res = mergeMarks(getMap('doramy_marks'), remote, pending, !!st.init);
+                    Lampa.Storage.set('doramy_marks', res.marks);
+                    st.init = true;
+                    st.last = Date.now();
+                    res.ops.forEach(function (o) { st.queue.push({ id: o.id, kind: o.kind, op: o.op, ts: Date.now(), tries: 0 }); });
+                    saveSync(st);
+                    var info = { login: login, total: Object.keys(res.marks).length, pushed: res.ops.length };
+                    if (res.ops.length) flushQueue(function () { finish(null, info); });
+                    else finish(null, info);
+                }
+            });
+        }, function (e) { finish(e); });
+    }
+
+    function runSync(silent) {
+        if (!silent) Lampa.Noty.show('Синхронизирую с аккаунтом doramy.club…');
+        syncAll(function (err, info) {
+            if (err === 'busy') return;
+            if (err) return !silent && Lampa.Noty.show('Синхронизация: ' + syncErrorText(err));
+            if (!silent) Lampa.Noty.show('Синхронизировано: ' + info.login + ', дорам в списках — ' + info.total + (info.pushed ? ', отправлено на сайт — ' + info.pushed : ''));
+        });
+    }
+
+    function checkAccount() {
+        if (!cookie()) return Lampa.Noty.show('Сначала вставьте cookie сессии в настройках');
+        Lampa.Noty.show('Проверяю вход…');
+        checkSession(function (login) { Lampa.Noty.show('Вход выполнен: ' + login); },
+            function (e) { Lampa.Noty.show(syncErrorText(e)); });
+    }
+
+    function logoutAccount() {
+        Lampa.Storage.set('doramy_cookie', '');
+        Lampa.Storage.set('doramy_account', {});
+        Lampa.Storage.set('doramy_sync', {});
+        nonceMem = null;
+        Lampa.Noty.show('Аккаунт отключён; локальные списки сохранены');
     }
 
     function errorText(e) {
@@ -1074,10 +1338,16 @@
 
     function openMarksMenu() {
         var back = function () { Lampa.Controller.toggle('content'); };
+        var items = LIST_KEYS.map(function (k) { return { title: LISTS[k] + ' (' + markedItems(k).length + ')', value: k }; });
+        if (accountOn()) items.push({ title: 'Синхронизировать с аккаунтом' + (accountInfo().login ? ' (' + accountInfo().login + ')' : ''), sync: true });
         Lampa.Select.show({
             title: 'Мои списки',
-            items: LIST_KEYS.map(function (k) { return { title: LISTS[k] + ' (' + markedItems(k).length + ')', value: k }; }),
-            onSelect: function (it) { back(); openMarks(it.value); },
+            items: items,
+            onSelect: function (it) {
+                back();
+                if (it.sync) return runSync(false);
+                openMarks(it.value);
+            },
             onBack: back
         });
     }
@@ -1627,7 +1897,7 @@
             if (m.status) items.push({ title: 'Убрать из списка статуса', status: '' });
             var t = $.extend({}, item, { title: d.title || item.title, poster: d.poster || item.poster, year: d.year || item.year, country: d.country || item.country });
             Lampa.Select.show({
-                title: 'Мои списки',
+                title: 'Мои списки' + (accountOn() && accountInfo().login ? ' · аккаунт ' + accountInfo().login : ''),
                 items: items,
                 onSelect: function (it) {
                     Lampa.Controller.toggle('content');
@@ -1957,6 +2227,42 @@
             param: { name: 'doramy_voice_pref', type: 'select', values: { voice: 'Озвучка', subs: 'Субтитры' }, default: 'voice' },
             field: { name: 'Предпочитаемый вариант', description: 'Что открывать первым на странице тайтла, если озвучка ещё не выбиралась' }
         });
+        Lampa.SettingsApi.addParam({ component: 'doramyclub', param: { name: 'doramy_acc_title', type: 'title' }, field: { name: 'Аккаунт doramy.club' } });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_cookie', type: 'input', values: '', default: '' },
+            field: { name: 'Cookie сессии', description: 'Войдите на doramy.club в браузере и скопируйте заголовок Cookie запроса. Пароль не нужен и не хранится. Cookie уходит только на адрес сайта из настроек' },
+            onChange: function () { nonceMem = null; }
+        });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_acc_check', type: 'button' },
+            field: { name: 'Проверить вход', description: 'Показывает логин аккаунта, если сессия принята' },
+            onChange: checkAccount
+        });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_sync_on', type: 'trigger', default: true },
+            field: { name: 'Синхронизировать списки с сайтом', description: 'Избранное, «На потом», «Смотрю», «Просмотрено», «Брошено»: изменения в Lampa уходят на сайт, списки сайта попадают в Lampa' }
+        });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_sync_now', type: 'button' },
+            field: { name: 'Синхронизировать сейчас' },
+            onChange: function () { runSync(false); }
+        });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_auto_status', type: 'trigger', default: false },
+            field: { name: 'Авто-статус «Смотрю»', description: 'При запуске серии ставить статус «Смотрю», если статуса ещё нет' }
+        });
+        Lampa.SettingsApi.addParam({
+            component: 'doramyclub',
+            param: { name: 'doramy_acc_logout', type: 'button' },
+            field: { name: 'Отключить аккаунт', description: 'Забыть cookie и очередь отправки; локальные списки остаются' },
+            onChange: logoutAccount
+        });
+        Lampa.SettingsApi.addParam({ component: 'doramyclub', param: { name: 'doramy_net_title', type: 'title' }, field: { name: 'Сеть' } });
         Lampa.SettingsApi.addParam({
             component: 'doramyclub',
             param: { name: 'doramy_proxy', type: 'input', values: '', default: '' },
@@ -2053,6 +2359,8 @@
         addMenu();
         try { addGlobalSearch(); } catch (e) { console.log('Doramy.club', 'global search unavailable', e); }
         try { addMainRows(); } catch (e) { console.log('Doramy.club', 'main rows unavailable', e); }
+        // фоновая синхронизация при запуске не чаще раза в час
+        if (accountOn() && Date.now() - (syncState().last || 0) > 3600000) setTimeout(function () { runSync(true); }, 4000);
     }
 
     if (window.appready) start();

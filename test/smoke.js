@@ -97,8 +97,8 @@ function mk(opts) {
         Component: { add: function (n, c) { S.comps[n] = c; } },
         Listener: { follow: function () {} },
         Reguest: function () {
-            this['native'] = function (u, c, e, post) {
-                S.calls.push({ u: u, post: post });
+            this['native'] = function (u, c, e, post, opt) {
+                S.calls.push({ u: u, post: post, headers: (opt && opt.headers) || {} });
                 var body = route(u, post);
                 setTimeout(function () { body === null ? e() : c(body); }, 1);
             };
@@ -109,6 +109,10 @@ function mk(opts) {
     function route(u, post) {
         if (opts.dead) return null;
         var m;
+        if (/wp-admin\/admin-ajax\.php/.test(u)) { S.ajax = (S.ajax || []).concat([post]); return opts.ajax !== undefined ? opts.ajax : '<li>ok</li>'; }
+        if (/doramy\.club\/regs-vash-profil/.test(u)) return opts.guest ? '<html><form id="loginform"></form></html>' : '<table><tr><th class="profpart1">Логин:</th><th class="profpart2">tester</th></tr><tr><th class="profpart1">E-mail:</th><th class="profpart2">tester@example.com</th></tr></table>';
+        if (/doramy\.club\/regs-favorit/.test(u)) return opts.guest ? '<html>login</html>' : '<script>var wfmFavorites = {"url":"x","nonce":"abc123","postId":"8431"};</script>' + F.LISTING.replace(/<a class="next[^>]*>[^<]*<\/a>/, '');
+        if (/doramy\.club\/regs-(budu|view|zakl|broh)/.test(u)) return '<div>пусто</div>';
         if (/doramy\.club\/(1-novinki|top|serialy|filmy)(\/page\/\d+)?$/.test(u)) return F.LISTING;
         if (/doramy\.club\/?$/.test(u)) return '<a href="/genre/komediya">Комедия</a><a href="/god/2025">2025</a><a href="/strana/2-kitaj">Китай</a>';
         if (/doramy\.club\/\?s=/.test(u)) return F.LISTING;
@@ -209,6 +213,77 @@ function mk(opts) {
     ok(S.sel.items.some(function (i) { return i.path === '/akter/li-dzhin-uk'; }) && S.sel.items.some(function (i) { return i.path === '/kanal/jtbc'; }), 'меню актёров/канала/студии');
     t.destroy();
 
+
+    console.log('6b. аккаунт: проверка входа, очередь, отправка на сайт');
+    var CK = 'wordpress_logged_in_x=1; __jhash_=1';
+    S = mk({ store: { doramy_cookie: CK, doramy_sync: { last: Date.now(), queue: [] } } });
+    t = new S.comps.doramyclub_title({ item: item }); t.activity = S.act; t.create();
+    ok(await until(function () { return S.$(t.render()).find('.dc-ep').length === 3; }), 'страница открыта с подключённым аккаунтом');
+    t.start();
+    S.$(t.render()).find('.dc-btn').filter(function () { return /^В списки/.test(S.$(this).text()); }).trigger('hover:enter');
+    ok(/Мои списки/.test(S.sel.title), 'меню списков');
+    S.sel.onSelect(S.sel.items[0]); // избранное
+    S.$(t.render()).find('.dc-btn').filter(function () { return /^В списки/.test(S.$(this).text()); }).trigger('hover:enter');
+    var watching = S.sel.items.filter(function (i) { return i.status === 'watching'; })[0];
+    S.sel.onSelect(watching);
+    ok(S.store.doramy_sync.queue.length === 2, 'в очереди 2 операции (избранное + смотрю): ' + S.store.doramy_sync.queue.map(function (q) { return q.kind + ':' + q.op; }).join(','));
+    ok(await until(function () { return S.ajax && S.ajax.length === 2; }, 200), 'после паузы обе операции отправлены на admin-ajax');
+    ok(/action=wfm_add/.test(S.ajax[0]) && /postId=48464/.test(S.ajax[0]) && /security=abc123/.test(S.ajax[0]), 'избранное: wfm_add + postId + nonce: ' + S.ajax[0]);
+    ok(/action=viewed_add/.test(S.ajax[1]), 'статус «Смотрю»: viewed_add: ' + S.ajax[1]);
+    var ac = S.calls.filter(function (c) { return /admin-ajax/.test(c.u); })[0];
+    ok(ac.headers.Cookie === CK, 'cookie сессии уходит заголовком на сайт');
+    ok(!S.calls.some(function (c) { return /kodikplayer/.test(c.u) && c.headers.Cookie; }), 'cookie не уходит на Kodik');
+    ok(S.store.doramy_sync.queue.length === 0, 'очередь пуста после отправки');
+    S.$(t.render()).find('.dc-btn').filter(function () { return /^В списки/.test(S.$(this).text()); }).trigger('hover:enter');
+    S.sel.onSelect(S.sel.items[0]); // снять избранное
+    ok(await until(function () { return S.ajax.length === 3; }, 200) && /action=wfm_del/.test(S.ajax[2]), 'снятие избранного: wfm_del');
+    S.$(t.render()).find('.dc-btn').filter(function () { return /^В списки/.test(S.$(this).text()); }).trigger('hover:enter');
+    S.sel.onSelect(S.sel.items.filter(function (i) { return i.status === 'done'; })[0]); // смена статуса: del старого + add нового
+    ok(await until(function () { return S.ajax.length === 5; }, 200) && /action=viewed_delh/.test(S.ajax[3]) && /action=zakl_add/.test(S.ajax[4]), 'смена статуса: viewed_delh → zakl_add');
+    t.destroy();
+
+    console.log('6c. аккаунт: вход и синхронизация');
+    S = mk({ store: { doramy_cookie: CK, doramy_sync: { last: Date.now(), queue: [] } } });
+    var prm = function (name) { return S.params.filter(function (x) { return x.param.name === name; })[0]; };
+    prm('doramy_acc_check').onChange();
+    ok(await until(function () { return S.notes.some(function (n) { return /Вход выполнен: tester/.test(n); }); }), 'проверка входа показывает логин');
+    ok(S.store.doramy_account.login === 'tester' && JSON.stringify(S.store).indexOf('example.com') < 0, 'e-mail аккаунта не сохраняется');
+    S.store.doramy_marks = { '999': { fav: true, status: '', item: { id: '999', title: 'Только в Lampa', url: 'https://doramy.club/999-x.html', poster: '' }, ts: 1 } };
+    prm('doramy_sync_now').onChange();
+    ok(await until(function () { return S.notes.some(function (n) { return /Синхронизировано/.test(n); }); }, 200), 'синхронизация завершилась');
+    var ids = Object.keys(S.store.doramy_marks).sort();
+    ok(ids.length === 4 && ids.indexOf('999') >= 0 && ids.indexOf('61469') >= 0, 'первая синхронизация — объединение: 3 с сайта + 1 локальная: ' + ids.join(','));
+    ok(await until(function () { return S.ajax && S.ajax.some(function (a) { return /action=wfm_add/.test(a) && /postId=999/.test(a); }); }, 200), 'локальная дорама добавлена на сайт');
+    ok(S.store.doramy_sync.init === true && S.store.doramy_sync.queue.length === 0, 'флаг первой синхронизации и пустая очередь');
+    ok(S.store.doramy_marks['61469'].fav === true && S.store.doramy_marks['61469'].item.title === 'Бог меча', 'карточки с сайта сохранены с названием');
+
+    console.log('6d. аккаунт: сессия не принята — списки не трогаем');
+    S = mk({ store: { doramy_cookie: CK, doramy_marks: { '5': { fav: true, status: '', item: { id: '5', title: 'x' }, ts: 1 } }, doramy_sync: { init: true, last: Date.now(), queue: [] } }, guest: true });
+    prm = function (name) { return S.params.filter(function (x) { return x.param.name === name; })[0]; };
+    prm('doramy_sync_now').onChange();
+    ok(await until(function () { return S.notes.some(function (n) { return /Сессия не принята/.test(n); }); }), 'понятная ошибка про сессию');
+    ok(Object.keys(S.store.doramy_marks).length === 1, 'локальные списки не стёрты при неудачной сессии');
+
+    console.log('6e. аккаунт: nonce отклонён (-1) → обновляется и повторяется');
+    S = mk({ store: { doramy_cookie: CK, doramy_sync: { last: Date.now(), queue: [{ id: '7', kind: 'fav', op: 'add', ts: 1, tries: 0 }] } }, ajax: '-1' });
+    S.w.Lampa.Storage.set('doramy_sync', { last: Date.now(), queue: [{ id: '7', kind: 'fav', op: 'add', ts: 1, tries: 0 }] });
+    var before = S.calls.length;
+    prm = function (name) { return S.params.filter(function (x) { return x.param.name === name; })[0]; };
+    prm('doramy_sync_now').onChange();
+    await sleep(600);
+    ok(S.calls.filter(function (c) { return /regs-favorit/.test(c.u); }).length >= 2, 'nonce запрошен повторно после -1');
+    ok(S.store.doramy_sync && S.store.doramy_sync.queue.length === 1 && S.store.doramy_sync.queue[0].tries === 1, 'операция осталась в очереди (tries=1) для повтора');
+
+    console.log('6f. без аккаунта очередь не копится');
+    S = mk();
+    t = new S.comps.doramyclub_title({ item: item }); t.activity = S.act; t.create();
+    await until(function () { return S.$(t.render()).find('.dc-ep').length === 3; });
+    t.start();
+    S.$(t.render()).find('.dc-btn').filter(function () { return /^В списки/.test(S.$(this).text()); }).trigger('hover:enter');
+    S.sel.onSelect(S.sel.items[0]);
+    ok(S.store.doramy_marks['48464'].fav === true && !(S.store.doramy_sync && S.store.doramy_sync.queue && S.store.doramy_sync.queue.length), 'локальная отметка есть, очереди нет');
+    t.destroy();
+
     console.log('7. только субтитры');
     var onlySubs = '<div class="player"><script> uvk.show([\n\'Озвучка\',\'Субтитры\',],[\n[],["kodikplayer.com%2Fseria%2F7%2Fbbb%2F720p","kodikplayer.com%2Fseria%2F8%2Fccc%2F720p",],]);</script></div>';
     S = mk({ player: onlySubs }); t = new S.comps.doramyclub_title({ item: item }); t.activity = S.act; t.create();
@@ -228,7 +303,7 @@ function mk(opts) {
     console.log('9. регистрация: меню, настройки, поиск, ряды');
     S = mk();
     ok(S.$('.menu__list [data-action="doramyclub"]').length === 1, 'пункт меню добавлен');
-    ok(S.params && S.params.length >= 7, 'настройки зарегистрированы');
+    ok(S.params && S.params.length >= 14, 'настройки зарегистрированы');
     ok(S.source && S.source.title === 'Doramy.club', 'источник глобального поиска');
     ok(S.rows.length === 2, 'ряды главного экрана');
 

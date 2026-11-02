@@ -224,6 +224,76 @@ t('parseKodikParams: urlParams, vInfo, путь скрипта плеера', fu
     assert.strictEqual(P.parseKodikParams('').params, null);
 });
 
+
+/* ---------- аккаунт и синхронизация ---------- */
+
+t('parseNonce / parseAccountName: nonce из wfmFavorites, логин (не e-mail)', function () {
+    assert.strictEqual(P.parseNonce('<script>var wfmFavorites = {"url":"https:\\/\\/doramy.club\\/wp-admin\\/admin-ajax.php","nonce":"04aca10880","postId":"61103"};</script>'), '04aca10880');
+    assert.strictEqual(P.parseNonce('<html></html>'), '');
+    var prof = '<tr><th class="profpart1">Логин:</th><th class="profpart2">Mortifor</th></tr><tr><th class="profpart1">E-mail:</th><th class="profpart2">a@b.c</th></tr>';
+    assert.strictEqual(P.parseAccountName(prof), 'Mortifor');
+    assert.strictEqual(P.parseAccountName('<form id="loginform"></form>'), '');
+});
+
+t('parseAccountList: карточки каталога и запасной разбор по ссылкам', function () {
+    assert.strictEqual(P.parseAccountList(LISTING, BASE).length, 3);
+    var alt = '<ul class="fav-list"><li><a href="https://doramy.club/60612-drugaya-lyubov-no-ne-ty.html"><img src="/x.jpg">Другая любовь, но не ты</a> <a class="del-link" data-post="60612" href="#">Удалить</a></li>' +
+        '<li><a href="/61103-100-dnej-lzhi.html">100 дней лжи</a></li></ul>';
+    var l = P.parseAccountList(alt, BASE);
+    assert.deepStrictEqual(l.map(function (x) { return x.id + ':' + x.title; }), ['60612:Другая любовь, но не ты', '61103:100 дней лжи']);
+    assert.strictEqual(l[0].poster, 'https://doramy.club/x.jpg');
+    assert.deepStrictEqual(P.parseAccountList('<div>пусто</div>', BASE), []);
+});
+
+t('LIST_ACTIONS: имена action-ов плагина gid-favorites', function () {
+    assert.strictEqual(P.LIST_ACTIONS.fav.add, 'wfm_add');
+    assert.strictEqual(P.LIST_ACTIONS.later.del, 'budu_delh');
+    assert.strictEqual(P.LIST_ACTIONS.watching.add, 'viewed_add');
+    assert.strictEqual(P.LIST_ACTIONS.done.add, 'zakl_add');
+    assert.strictEqual(P.LIST_ACTIONS.dropped.del, 'broh_delh');
+    assert.strictEqual(P.LIST_ACTIONS.dropped.page, '/regs-broh');
+});
+
+var IT = function (id) { return { id: id, title: 't' + id }; };
+
+t('mergeMarks: первая синхронизация — объединение, ничего не теряется', function () {
+    var local = { 1: { fav: true, status: '', item: IT('1'), ts: 5 }, 2: { fav: false, status: 'later', item: IT('2'), ts: 5 } };
+    var remote = { fav: { 2: IT('2'), 3: IT('3') }, later: {}, watching: { 1: IT('1') }, done: {}, dropped: {} };
+    var r = P.mergeMarks(local, remote, {}, false);
+    assert.deepStrictEqual(Object.keys(r.marks).sort(), ['1', '2', '3']);
+    assert.strictEqual(r.marks[1].fav, true);          // локальное избранное сохранено
+    assert.strictEqual(r.marks[1].status, 'watching'); // статус с сайта подтянут
+    assert.strictEqual(r.marks[2].fav, true);          // избранное с сайта подтянуто
+    assert.strictEqual(r.marks[2].status, 'later');    // локальный статус сохранён
+    var ops = r.ops.map(function (o) { return o.id + ':' + o.kind + ':' + o.op; }).sort();
+    assert.deepStrictEqual(ops, ['1:fav:add', '2:later:add']);
+});
+
+t('mergeMarks: после первой синхронизации сайт главнее, удаления на сайте применяются', function () {
+    var local = { 1: { fav: true, status: '', item: IT('1'), ts: 5 }, 2: { fav: true, status: '', item: IT('2'), ts: 5 } };
+    var remote = { fav: { 1: IT('1') }, later: { 4: IT('4') }, watching: {}, done: {}, dropped: {} };
+    var r = P.mergeMarks(local, remote, {}, true);
+    assert.deepStrictEqual(Object.keys(r.marks).sort(), ['1', '4']);
+    assert.strictEqual(r.marks[4].status, 'later');
+    assert.deepStrictEqual(r.ops, []);
+});
+
+t('mergeMarks: неотправленные локальные изменения не затираются сайтом', function () {
+    var local = { 1: { fav: true, status: 'done', item: IT('1'), ts: 9 } };
+    var remote = { fav: {}, later: {}, watching: {}, done: {}, dropped: {} };
+    var r = P.mergeMarks(local, remote, { 1: true }, true);
+    assert.strictEqual(r.marks[1].status, 'done');
+    assert.strictEqual(r.marks[1].fav, true);
+    // локально снято, но удаление ещё не отправлено, а на сайте отметка есть — остаётся снятой
+    var r2 = P.mergeMarks({}, { fav: { 7: IT('7') }, later: {}, watching: {}, done: {}, dropped: {} }, { 7: true }, true);
+    assert.deepStrictEqual(Object.keys(r2.marks), []);
+});
+
+t('mergeMarks: несколько статусов на сайте — берётся самый «живой» (смотрю > на потом > просмотрено > брошено)', function () {
+    var remote = { fav: {}, later: { 1: IT('1') }, watching: {}, done: { 1: IT('1') }, dropped: { 1: IT('1') } };
+    assert.strictEqual(P.mergeMarks({}, remote, {}, true).marks[1].status, 'later');
+});
+
 /* ---------- прочее ---------- */
 
 t('looksLikeChallenge: страница anti-bot распознаётся, обычная — нет', function () {
