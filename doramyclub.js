@@ -780,9 +780,19 @@
         return html.indexOf('__js_p_') >= 0 && html.indexOf('get_jhash') >= 0 && html.indexOf('post-list') < 0;
     }
 
+    // Пауза перед повтором при 429/503 (мс), либо 0 — не повторять. attempt — номер уже сделанных повторов.
+    // retryAfter — значение заголовка Retry-After в секундах; ограничиваем сверху, чтобы не вешать интерфейс.
+    var RETRY_MAX = 2;
+    function retryDelay(code, retryAfter, attempt) {
+        if ((code !== 429 && code !== 503) || attempt >= RETRY_MAX) return 0;
+        var sec = parseFloat(retryAfter);
+        if (sec > 0) return Math.min(sec, 10) * 1000;
+        return 1500 * Math.pow(2, attempt);
+    }
+
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = {
-            VERSION: VERSION, FALLBACK_MENU: FALLBACK_MENU, parseListing: parseListing, hasNext: hasNext, parseMenu: parseMenu,
+            retryDelay: retryDelay, VERSION: VERSION, FALLBACK_MENU: FALLBACK_MENU, parseListing: parseListing, hasNext: hasNext, parseMenu: parseMenu,
             parseDetail: parseDetail, parseKodikLink: parseKodikLink, kodikUrl: kodikUrl, parseKodikPage: parseKodikPage,
             parseKodikParams: parseKodikParams, decodeKodik: decodeKodik, parseFtor: parseFtor, pickQuality: pickQuality,
             listPath: listPath, searchPath: searchPath, fmtTime: fmtTime, looksLikeChallenge: looksLikeChallenge, strip: strip,
@@ -1059,10 +1069,22 @@
                 dataType: 'text',
                 timeout: 20000,
                 success: ok,
-                error: function (xhr, status) { err(status || 'error'); }
+                error: function (xhr, status) { err(status || 'error', xhr); }
             });
         };
-        var direct = function () { ajax(url, function (e) { fail(e); }); };
+        var direct = function () {
+            ajax(url, function (e, xhr) {
+                // 429/503 от сайта: повторяем GET с паузой, пока держим слот очереди (POST не повторяем — не идемпотентен)
+                var n = opts._try || 0, wait = 0;
+                if (opts.site && !opts.post) {
+                    var ra = null;
+                    try { ra = xhr && xhr.getResponseHeader && xhr.getResponseHeader('Retry-After'); } catch (x) { }
+                    wait = retryDelay(xhr && xhr.status, ra, n);
+                }
+                if (!wait) return fail(e);
+                setTimeout(function () { net(url, $.extend({}, opts, { _q: 1, _try: n + 1 }), ok, fail); }, wait);
+            });
+        };
         if (proxy) return ajax(proxy + url, function () { fail('proxy'); });
         try {
             var headers = { 'User-Agent': opts.site ? siteUA() : DESKTOP_UA };

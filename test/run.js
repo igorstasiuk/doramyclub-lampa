@@ -494,6 +494,16 @@ t('detectNews: база при первом виде, новости при ро
 
 /* ---------- прочее ---------- */
 
+t('retryDelay: 429/503 с нарастающей паузой, Retry-After, лимит повторов', function () {
+    assert.strictEqual(P.retryDelay(429, null, 0), 1500);
+    assert.strictEqual(P.retryDelay(503, '', 1), 3000);
+    assert.strictEqual(P.retryDelay(429, '4', 0), 4000);
+    assert.strictEqual(P.retryDelay(429, '120', 0), 10000);
+    assert.strictEqual(P.retryDelay(429, null, 2), 0);
+    assert.strictEqual(P.retryDelay(404, null, 0), 0);
+    assert.strictEqual(P.retryDelay(0, null, 0), 0);
+});
+
 t('looksLikeChallenge: страница anti-bot распознаётся, обычная — нет', function () {
     var ch = '<html><script>function get_jhash(b){} get_param("__js_p_", "int", 0)</script></html>';
     assert.strictEqual(P.looksLikeChallenge(ch), true);
