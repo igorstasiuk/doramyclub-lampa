@@ -343,7 +343,17 @@ function mk(opts) {
     ok(S.notes.some(function (n) { return /Cookie вставлена \(2 шт\.\)/.test(n); }), 'сообщение о числе cookie');
     S = mk();
     S.params.filter(function (x) { return x.param.name === 'doramy_cookie_paste'; })[0].onChange();
-    ok(S.notes.some(function (n) { return /Буфер обмена недоступен/.test(n); }), 'нет буфера обмена — подсказка про помощника');
+    ok(S.notes.some(function (n) { return /Буфер обмена недоступен/.test(n); }) && typeof S.input === 'function', 'нет буфера обмена — открыто поле ввода');
+    S.input('Cookie: wordpress_logged_in_y=BBB;');
+    ok(S.store.doramy_cookie === 'wordpress_logged_in_y=BBB', 'cookie из поля ввода сохраняется');
+    S = mk();
+    S.w.navigator.clipboard = { readText: function () { return Promise.reject(new Error('denied')); } };
+    S.params.filter(function (x) { return x.param.name === 'doramy_cookie_paste'; })[0].onChange();
+    ok(await until(function () { return typeof S.input === 'function'; }), 'буфер отклонён — тоже поле ввода');
+    S = mk();
+    S.w.navigator.clipboard = { readText: function () { return Promise.resolve('привет'); } };
+    S.params.filter(function (x) { return x.param.name === 'doramy_cookie_paste'; })[0].onChange();
+    ok(await until(function () { return typeof S.input === 'function'; }) && !S.store.doramy_cookie, 'в буфере не cookie — поле ввода, ничего не сохранено');
     // перенос через CUB (Storage.sync): по умолчанию выключен; включённый — регистрирует ключи и подтягивает cookie на новом устройстве
     S = mk();
     ok(!S.synced || S.synced.length === 0, 'по умолчанию ключи в синхронизацию Lampa не регистрируются');

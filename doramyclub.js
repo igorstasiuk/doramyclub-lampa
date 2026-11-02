@@ -1465,17 +1465,28 @@
         initCubSync();
     }
 
+    // Запасной путь: поле ввода Lampa (на Mac работает вставка Cmd+V, на приставке — экранная клавиатура)
+    function typeCookie(note) {
+        if (note) Lampa.Noty.show(note);
+        Lampa.Input.edit({ title: 'Вставьте строку Cookie', value: '', free: true, nosave: true }, function (txt) {
+            if (!txt) return;
+            if (!storeCookie(txt)) return Lampa.Noty.show('Это не похоже на строку Cookie');
+            Lampa.Noty.show('Cookie сохранена (' + analyzeCookie(cookie(), '').names.length + ' шт.). Нажмите «Проверить вход»');
+        });
+    }
+
     function pasteCookie() {
+        var manual = function () { typeCookie('Буфер обмена недоступен (нужен HTTPS и разрешение) — вставьте cookie в поле'); };
         var done = function (t) {
-            if (!storeCookie(t)) return Lampa.Noty.show('В буфере обмена нет строки Cookie');
+            if (!t || !storeCookie(t)) return typeCookie('В буфере нет строки Cookie — вставьте её в поле');
             Lampa.Noty.show('Cookie вставлена (' + analyzeCookie(cookie(), '').names.length + ' шт.). Нажмите «Проверить вход»');
         };
         try {
             if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {
-                return navigator.clipboard.readText().then(done, function () { Lampa.Noty.show('Нет доступа к буферу обмена: разрешите его в браузере'); });
+                return navigator.clipboard.readText().then(done, manual);
             }
         } catch (e) { /* нет буфера */ }
-        Lampa.Noty.show('Буфер обмена недоступен на этом устройстве — введите cookie вручную или включите перенос через аккаунт Lampa');
+        manual();
     }
 
     function cookieAgeText() {
