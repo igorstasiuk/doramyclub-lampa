@@ -241,6 +241,8 @@
         var cm = parseComments(html);
         d.comments = cm.list;
         d.commentsClosed = cm.closed;
+        d.nonce = parseNonce(html);
+        d.moreComments = html.indexOf('class="list-com"') >= 0;
         d.collections = [];
         var pb = html.indexOf('class="podbor-s"');
         if (pb >= 0) {
@@ -653,15 +655,19 @@
     }
 
     // Инлайн-комментарии со страницы тайтла (только чтение)
-    function parseComments(html) {
+    // limit — сколько отзывов брать (инлайн-часть страницы по умолчанию 50, полный ответ gid_action — больше).
+    // Ответ gid_action — голые <li> без обёртки commentlist.
+    function parseComments(html, limit) {
         html = '' + html;
+        limit = limit || 50;
         var out = [], closed = /Отзывы к данной дораме уже закрыты/.test(html);
         var i = html.indexOf('class="commentlist"');
+        if (i < 0) i = html.indexOf('<li><div class="comment');
         if (i >= 0) {
-            var chunk = html.slice(i, i + 120000);
+            var chunk = html.slice(i, i + (limit > 50 ? 600000 : 120000));
             chunk.replace(/<div class="ct-author">([\s\S]*?)<\/div>\s*<div class="ct-ti">([\s\S]*?)<\/div>[\s\S]*?<div class="comment-text-content">([\s\S]*?)<\/div>\s*<\/div>/g, function (m, a, d, t) {
                 var text = strip(t);
-                if (text && out.length < 50) out.push({ author: strip(a), date: strip(d), text: text });
+                if (text && out.length < limit) out.push({ author: strip(a), date: strip(d), text: text });
                 return m;
             });
         }
@@ -1333,6 +1339,24 @@
             nonceMem = { v: n, ts: Date.now() };
             ok(n);
         }, function (e) { fail(e || 'error'); });
+    }
+
+    // Все отзывы тайтла (gid_action, только чтение): cb(список, closed)
+    // hint — nonce со страницы тайтла (есть и у гостя); при отказе берём свежий через getNonce
+    function loadAllComments(id, hint, ok, fail, retried) {
+        var withNonce = hint && !retried ? function (cb) { cb(hint); } : function (cb) { getNonce(cb, function (e) { fail(e); }, !!retried); };
+        withNonce(function (nonce) {
+            net(absUrl('/wp-admin/admin-ajax.php', base()), { site: true, referer: base() + '/', post: enc({ security: nonce, action: 'gid_action', postId: id }) }, function (res) {
+                if (looksLikeChallenge(res)) return fail('challenge');
+                var t = ('' + res).trim();
+                if (t === '-1' || t === '0') {
+                    if (!retried) { nonceMem = null; return loadAllComments(id, '', ok, fail, true); }
+                    return fail('rejected');
+                }
+                var cm = parseComments(t, 300);
+                ok(cm.list, cm.closed);
+            }, function (e) { fail(e || 'error'); });
+        });
     }
 
     // Одно действие admin-ajax.php (action = wfm_add / budu_del / ...). Успех на сайте определяем по ответу, а затем подтверждаем состоянием кнопки на странице тайтла.
@@ -3051,6 +3075,12 @@
             var gen = (d.genres.length || d.country) ? button(btnsBox, 'Жанры', genresMenu) : null;
             var collBtn = d.collections && d.collections.length ? button(btnsBox, 'Подборки', collectionsMenu) : null;
             var commBtn = d.comments && d.comments.length ? button(btnsBox, 'Отзывы (' + d.comments.length + ')', showComments) : null;
+            var allBtn = d.moreComments && d.comments && d.comments.length ? button(btnsBox, 'Все отзывы', function () {
+                Lampa.Noty.show('Загружаю отзывы…');
+                loadAllComments(item.id, d.nonce, function (list) { list.length ? showComments(list) : showComments(); }, function () {
+                    Lampa.Noty.show('Doramy.club: не удалось загрузить все отзывы'); Lampa.Controller.toggle('content');
+                });
+            }) : null;
             var lampaBtn = (Lampa.Search && Lampa.Search.open) ? button(btnsBox, 'Карточка Lampa', openTmdb) : null;
             body.append(btnsBox);
             scroll.append(head);
@@ -3063,7 +3093,7 @@
             scroll.append(simHost);
 
             var btnRow = [continueBtn, voiceBtn, qBtn, plBtn, listBtn];
-            [descrBtn, ppl, gen, collBtn, commBtn, lampaBtn].forEach(function (b) { if (b) btnRow.push(b); });
+            [descrBtn, ppl, gen, collBtn, commBtn, allBtn, lampaBtn].forEach(function (b) { if (b) btnRow.push(b); });
             rows = [btnRow, [], [], []];
 
             // Основная озвучка и субтитры — вкладки сайта; остальные озвучки грузим из Kodik в фоне
@@ -3138,9 +3168,10 @@
         }
 
         // Отзывы: только чтение, инлайн-часть со страницы тайтла
-        function showComments() {
+        function showComments(list) {
+            list = $.isArray(list) ? list : d.comments;
             var lines = ['Осторожно, могут быть спойлеры.' + (d.commentsClosed ? ' Новые отзывы к этой дораме закрыты.' : '')];
-            d.comments.forEach(function (c) { lines.push(c.author + ' · ' + c.date + '\n' + c.text); });
+            list.forEach(function (c) { lines.push(c.author + ' · ' + c.date + '\n' + c.text); });
             var box = $('<div class="dc-modal"></div>').append($('<div class="dc-modal__text"></div>').text(lines.join('\n\n')));
             Lampa.Modal.open({ title: 'Отзывы: ' + d.title, html: box, size: 'medium', onBack: function () { Lampa.Modal.close(); Lampa.Controller.toggle('content'); } });
         }

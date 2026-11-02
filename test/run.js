@@ -395,6 +395,10 @@ t('parseComments: инлайн-отзывы только для чтения, з
     assert.strictEqual(c.list[0].date, '18 сентября 2025');
     assert.ok(/2 сезон/.test(c.list[0].text));
     assert.deepStrictEqual(P.parseComments('<html></html>'), { list: [], closed: false });
+    var all = P.parseComments(F2.GID_ALL, 300);
+    assert.deepStrictEqual(all.list.map(function (x) { return x.author; }), ['Bubusik123', 'Solihaabdulaziz', 'Lenart']);
+    assert.strictEqual(all.list[2].date, '13 сентября 2025');
+    assert.strictEqual(P.parseComments(F2.GID_ALL, 2).list.length, 2);
 });
 
 t('parseDetail: число оценок, HD-постер (og:image), статус, расписание, подборки, отзывы', function () {

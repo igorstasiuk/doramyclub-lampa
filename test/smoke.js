@@ -124,6 +124,7 @@ function mk(opts) {
         var m;
         if (/wp-admin\/admin-ajax\.php/.test(u)) {
             if (/action=fast_ajax_search_akters/.test(u)) return F.FAST_AKTERS;
+            if (post && /action=gid_action/.test(post)) { S.ajax = (S.ajax || []).concat([post]); return F.GID_ALL; }
             if (post && /action=rand_posts/.test(post)) { S.rand = (S.rand || []).concat([post]); return F.RAND_RESPONSE; }
             if (post) S.ajax = (S.ajax || []).concat([post]);
             return opts.ajax !== undefined ? opts.ajax : '<li>ok</li>';
@@ -507,7 +508,7 @@ function mk(opts) {
     m.destroy();
 
     console.log('12. страница тайтла: заставка, TMDB, отзывы, «В ролях», подборки, Автоперевод');
-    var EXTRA = '<meta property="og:image" content="https://doramy.club/wp-content/uploads/2024/01/hd.jpg"><span itemprop="ratingCount">2&nbsp;996</span><ul class="podbor-s"><li><a href="https://doramy.club/razdel/doramy-pro-shkolu"><img src="/x.jpg" alt="Дорамы про школу"></a></li></ul>' + F.COMMENTS_HTML;
+    var EXTRA = '<meta property="og:image" content="https://doramy.club/wp-content/uploads/2024/01/hd.jpg"><span itemprop="ratingCount">2&nbsp;996</span><script>var wfmFavorites = {"url":"x","nonce":"ab77","postId":"48464"};</script><div class="list-com">Все комментарии</div><ul class="podbor-s"><li><a href="https://doramy.club/razdel/doramy-pro-shkolu"><img src="/x.jpg" alt="Дорамы про школу"></a></li></ul>' + F.COMMENTS_HTML;
     var itemO = { id: '48464', url: 'https://doramy.club/48464-1-eskvajr.html', title: '1 эсквайр', poster: '', orig: 'Esquire' };
     S = mk({ extra: EXTRA, store: { doramy_sync: { last: Date.now() } } });
     t = new S.comps.doramyclub_title({ item: itemO }); t.activity = S.act; t.create();
@@ -522,6 +523,10 @@ function mk(opts) {
     ok(S.sel.items[0].path === '/razdel/doramy-pro-shkolu', 'кнопка «Подборки» ведёт в раздел');
     btn(S, t, /^Отзывы \(2\)/).trigger('hover:enter');
     ok(/Отзывы/.test(S.modal.title) && /спойлеры/.test(S.modal.html.text()) && /ZHDS/.test(S.modal.html.text()) && /закрыты/.test(S.modal.html.text()), 'отзывы: спойлер-предупреждение, текст, «закрыты»');
+    S.modal = null; S.ajax = [];
+    btn(S, t, /^Все отзывы/).trigger('hover:enter');
+    ok(await until(function () { return S.modal && /Lenart/.test(S.modal.html.text()); }, 200), 'все отзывы: gid_action, три отзыва в окне');
+    ok(S.ajax.length === 1 && /security=ab77/.test(S.ajax[0]) && /action=gid_action/.test(S.ajax[0]) && /postId=48464/.test(S.ajax[0]), 'все отзывы: nonce берётся со страницы тайтла');
     btn(S, t, /^Карточка Lampa/).trigger('hover:enter');
     ok(await until(function () { return S.pushed[S.pushed.length - 1].component === 'full'; }, 100), 'TMDB: открыта полная карточка Lampa');
     var full = S.pushed[S.pushed.length - 1];
