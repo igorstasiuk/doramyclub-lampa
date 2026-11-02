@@ -719,7 +719,8 @@
     function normalizeCookie(str) {
         var t = ('' + (str || '')).replace(/[\r\n]+/g, ' ').trim();
         t = t.replace(/^-H\s+/i, '').replace(/^["']+|["']+$/g, '').trim();
-        t = t.replace(/^cookie\s*:\s*/i, '');
+        // «Cookie: a=b», а также отдельная строка-заголовок «cookie» перед значением (так копируют из DevTools)
+        t = t.replace(/^cookie(?:\s*:\s*|\s+(?=[^=;\s]+=))/i, '');
         return t.split(/\s*;\s*/).filter(function (x) { return x && x.indexOf('=') > 0; }).join('; ');
     }
 
@@ -1635,7 +1636,12 @@
     }
 
     function errorText(e) {
-        if (e === 'challenge') return 'Сайт отдал проверку браузера (anti-bot) вместо страницы. Укажите прокси в настройках плагина (см. README).';
+        if (e === 'challenge') {
+            var a = analyzeCookie(cookie(), siteUA());
+            if (a.hasAntibot && a.uaMatch === false) return 'Сайт отдал проверку браузера: cookie выданы другому браузеру (User-Agent не совпал). Если cookie взяты вами из своего браузера, включите в настройках «User-Agent из cookie».';
+            if (cookie() && !a.hasAntibot) return 'Сайт отдал проверку браузера. В cookie нет её отметок (__jhash_, __jua_): скопируйте заголовок Cookie целиком со страницы сайта.';
+            return 'Сайт отдал проверку браузера (anti-bot) вместо страницы. Вставьте cookie из своего браузера или укажите прокси в настройках плагина (см. README).';
+        }
         if (e === 'proxy') return 'Прокси не отвечает. Проверьте адрес прокси в настройках плагина.';
         return 'Не удалось загрузить данные doramy.club. Проверьте сеть, адрес сайта и прокси в настройках.';
     }

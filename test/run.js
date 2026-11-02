@@ -453,6 +453,9 @@ t('normalizeCookie: префикс Cookie:, кавычки, cURL-вариант,
     assert.strictEqual(P.normalizeCookie("-H 'cookie: a=1; b=2'"), 'a=1; b=2');
     assert.strictEqual(P.normalizeCookie('a=1;\nb=2\r\n'), 'a=1; b=2');
     assert.strictEqual(P.normalizeCookie('"a=1; b=2"'), 'a=1; b=2');
+    assert.strictEqual(P.normalizeCookie('cookie\nwordpress_logged_in_x=1; __jhash_=2'), 'wordpress_logged_in_x=1; __jhash_=2');
+    assert.strictEqual(P.normalizeCookie('Cookie\r\na=1; b=2'), 'a=1; b=2');
+    assert.strictEqual(P.normalizeCookie('cookie=abc; b=2'), 'cookie=abc; b=2');
     assert.strictEqual(P.normalizeCookie('мусор'), '');
     assert.strictEqual(P.normalizeCookie(''), '');
 });

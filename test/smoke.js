@@ -320,6 +320,10 @@ function mk(opts) {
     m.start();
     ok(S.focused !== null, 'на экране ошибки есть что выбрать');
     m.destroy();
+    S = mk({ gate: true, store: { doramy_cookie: 'wordpress_logged_in_x=1; __jua_=' + encodeURIComponent('Mozilla/5.0 Mine') } });
+    m = new S.comps.doramyclub_main({ catalog: { path: '/serialy', title: 'Сериалы' } }); m.activity = S.act; m.create();
+    ok(await until(function () { return /User-Agent из cookie/.test(S.$(m.render()).find('.dc-empty').text()); }, 200), 'заглушка при чужом UA в cookie — подсказка про «User-Agent из cookie»');
+    m.destroy();
     S = mk({ gate: true, store: { doramy_cookie: 'wordpress_logged_in_x=1; __jhash_=7' } });
     m = new S.comps.doramyclub_main({ catalog: { path: '/serialy', title: 'Сериалы' } }); m.activity = S.act; m.create();
     ok(await until(function () { return S.$(m.render()).find('.dc-card').length === 3; }, 200), 'с cookie, прошедшей проверку, каталог загружается');
