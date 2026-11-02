@@ -88,6 +88,7 @@ function mk(opts) {
         Player: { play: function (i) { S.played.push(i); }, playlist: function (p) { S.playlist = p; }, callback: function (c) { S.cb = c; }, runas: function () {}, listener: { follow: function () {} } },
         Select: { show: function (o) { S.sel = o; } },
         Noty: { show: function (t) { S.notes.push(t); } },
+        Settings: { update: function () { S.settingsUpdated = (S.settingsUpdated || 0) + 1; } },
         Input: { edit: function (o, cb) { S.input = cb; } },
         Platform: { is: function (n) { return n === 'android'; }, macOS: function () { return false; } },
         SettingsApi: { addComponent: function () {}, addParam: function (p) { (S.params = S.params || []).push(p); } },
@@ -341,6 +342,12 @@ function mk(opts) {
     S.params.filter(function (x) { return x.param.name === 'doramy_cookie_paste'; })[0].onChange();
     ok(await until(function () { return S.store.doramy_cookie === 'wordpress_logged_in_x=AAA; __jhash_=7'; }), 'вставка из буфера обмена нормализуется (префикс Cookie:, перевод строки)');
     ok(S.notes.some(function (n) { return /Cookie вставлена \(2 шт\.\)/.test(n); }), 'сообщение о числе cookie');
+    ok(!S.settingsUpdated, 'экран настроек закрыт — не перерисовываем');
+    S = mk();
+    S.$('body').append('<div class="settings-param" data-name="doramy_cookie"></div>');
+    S.w.navigator.clipboard = { readText: function () { return Promise.resolve('wordpress_logged_in_x=AAA'); } };
+    S.params.filter(function (x) { return x.param.name === 'doramy_cookie_paste'; })[0].onChange();
+    ok(await until(function () { return S.settingsUpdated === 1; }), 'после вставки поле cookie в открытых настройках перерисовывается');
     S = mk();
     S.params.filter(function (x) { return x.param.name === 'doramy_cookie_paste'; })[0].onChange();
     ok(S.notes.some(function (n) { return /Буфер обмена недоступен/.test(n); }) && typeof S.input === 'function', 'нет буфера обмена — открыто поле ввода');

@@ -1465,6 +1465,14 @@
         initCubSync();
     }
 
+    // Lampa рисует значения полей один раз при открытии экрана: после записи в Storage извне перерисовываем настройки,
+    // иначе поле «Cookie сессии» остаётся пустым, пока экран не откроют заново
+    function refreshSettings() {
+        try {
+            if ($('.settings-param[data-name="doramy_cookie"]').length && Lampa.Settings && Lampa.Settings.update) Lampa.Settings.update();
+        } catch (e) { /* экран настроек закрыт */ }
+    }
+
     // Запасной путь: поле ввода Lampa (на Mac работает вставка Cmd+V, на приставке — экранная клавиатура)
     function typeCookie(note) {
         if (note) Lampa.Noty.show(note);
@@ -1472,6 +1480,7 @@
             if (!txt) return;
             if (!storeCookie(txt)) return Lampa.Noty.show('Это не похоже на строку Cookie');
             Lampa.Noty.show('Cookie сохранена (' + analyzeCookie(cookie(), '').names.length + ' шт.). Нажмите «Проверить вход»');
+            refreshSettings();
         });
     }
 
@@ -1480,6 +1489,7 @@
         var done = function (t) {
             if (!t || !storeCookie(t)) return typeCookie('В буфере нет строки Cookie — вставьте её в поле');
             Lampa.Noty.show('Cookie вставлена (' + analyzeCookie(cookie(), '').names.length + ' шт.). Нажмите «Проверить вход»');
+            refreshSettings();
         };
         try {
             if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {
