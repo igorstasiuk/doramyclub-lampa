@@ -8,7 +8,7 @@
 (function () {
     'use strict';
 
-    var VERSION = '0.3.1';
+    var VERSION = '0.3.2';
     var DEFAULT_BASE = 'https://doramy.club';
     var KODIK = 'https://kodikplayer.com';
     var CACHE_TTL = 10 * 60 * 1000;
